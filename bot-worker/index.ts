@@ -25,7 +25,7 @@ export async function startWhatsAppWorker() {
   sock.ev.on('creds.update', saveCreds);
 
   // Monitor status koneksi real-time (§4.2)
-  sock.ev.on('connection.update', (update) => {
+  sock.ev.on('connection.update', (update: any) => {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
       console.log('[QR READY] Scan QR code via dashboard atau terminal:', qr);
@@ -44,7 +44,7 @@ export async function startWhatsAppWorker() {
   });
 
   // Handler pesan masuk
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+  sock.ev.on('messages.upsert', async ({ messages, type }: { messages: any[]; type: string }) => {
     if (type !== 'notify') return;
 
     for (const msg of messages) {

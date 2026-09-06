@@ -73,7 +73,7 @@ export default function LandingPage() {
       {/* Hero Section (§3, §4.1) */}
       <section className="relative pt-16 pb-24 px-6 lg:px-12 overflow-hidden circuit-grid">
         {/* Ambient Gradient Glows */}
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[300px] bg-circuit-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-150 h-75 bg-circuit-500/15 rounded-full blur-3xl pointer-events-none" />
 
         <div className="max-w-5xl mx-auto text-center space-y-6 relative z-10">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-panel-900 border border-panel-700 text-xs font-mono text-circuit-400">
@@ -83,7 +83,7 @@ export default function LandingPage() {
 
           <h1 className="font-display font-extrabold text-4xl sm:text-6xl text-white tracking-tight leading-[1.1]">
             Kelola Fitur Bot WhatsApp Anda <br />
-            <span className="bg-clip-text text-transparent bg-gradient-to-r from-circuit-400 via-blue-200 to-circuit-500">
+            <span className="bg-clip-text text-transparent bg-linear-to-r from-circuit-400 via-blue-200 to-circuit-500">
               Secara Visual Tanpa Sentuh Kode.
             </span>
           </h1>

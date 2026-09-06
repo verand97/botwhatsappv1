@@ -103,7 +103,7 @@ export default function BotSimulatorDrawer({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-full max-w-md h-[560px] flex flex-col rounded-2xl bg-[#111417] border border-panel-700 shadow-2xl shadow-black/80 overflow-hidden animate-slideUp">
+    <div className="fixed bottom-4 right-4 z-50 w-full max-w-md h-140 flex flex-col rounded-2xl bg-panel-950 border border-panel-700 shadow-2xl shadow-black/80 overflow-hidden animate-slideUp">
       {/* Simulator Top Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-panel-900 border-b border-panel-750">
         <div className="flex items-center gap-2.5">

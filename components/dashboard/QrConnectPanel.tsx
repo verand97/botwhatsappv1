@@ -178,7 +178,7 @@ export default function QrConnectPanel() {
                       <p className="font-mono text-sm text-live-400 mt-1 font-semibold">
                         {botInstance.nomor_wa}
                       </p>
-                      <p className="text-[11px] text-gray-400 mt-2 max-w-[200px]">
+                      <p className="text-[11px] text-gray-400 mt-2 max-w-50">
                         Socket Baileys aktif 24/7. Modul siap merespon perintah pesan masuk.
                       </p>
                     </div>

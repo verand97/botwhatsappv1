@@ -143,7 +143,7 @@ export default function StatChart() {
 
                 {/* Stacked Bar */}
                 <div
-                  className="w-full max-w-[48px] rounded-t-lg overflow-hidden bg-panel-800 transition-all duration-300 group-hover:brightness-110 flex flex-col justify-end"
+                  className="w-full max-w-12 rounded-t-lg overflow-hidden bg-panel-800 transition-all duration-300 group-hover:brightness-110 flex flex-col justify-end"
                   style={{ height: `${heightPercent}%` }}
                 >
                   {/* Top: AI & Downloader */}

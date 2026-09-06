@@ -64,7 +64,7 @@ export default function ModuleCard({ feature }: ModuleCardProps) {
       }`}
     >
       {/* Decorative Circuit Board Background Accents */}
-      <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl from-circuit-500/5 to-transparent pointer-events-none" />
+      <div className="absolute top-0 right-0 w-24 h-24 bg-linear-to-bl from-circuit-500/5 to-transparent pointer-events-none" />
 
       {/* SVG Circuit Energy Line (Signature Element §3.3) */}
       {/* Draws a glowing animated circuit conduit between the toggle switch and the module chip */}
@@ -158,7 +158,7 @@ export default function ModuleCard({ feature }: ModuleCardProps) {
         </div>
 
         {/* Tagline / Description */}
-        <p className="mt-3 text-xs text-gray-300 leading-relaxed min-h-[34px]">
+        <p className="mt-3 text-xs text-gray-300 leading-relaxed min-h-8.5">
           {feature.tagline}
         </p>
 

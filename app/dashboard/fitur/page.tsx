@@ -117,7 +117,7 @@ export default function PapanModulPage() {
         </div>
 
         {/* Search input */}
-        <div className="relative min-w-[220px] px-1">
+        <div className="relative min-w-55 px-1">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
           <input
             type="text"

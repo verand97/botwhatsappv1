@@ -26,7 +26,7 @@ export default function DashboardOverviewPage() {
   return (
     <div className="space-y-8">
       {/* Welcome & System State Banner */}
-      <div className="relative overflow-hidden p-6 sm:p-8 rounded-2xl bg-gradient-to-r from-panel-900 via-panel-850 to-panel-900 border border-panel-750">
+      <div className="relative overflow-hidden p-6 sm:p-8 rounded-2xl bg-linear-to-r from-panel-900 via-panel-850 to-panel-900 border border-panel-750">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2">
             <div className="flex items-center gap-2">
