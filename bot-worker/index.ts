@@ -19,7 +19,7 @@ export async function startWhatsAppWorker() {
   const sock: WASocket = makeWASocket({
     auth: state,
     printQRInTerminal: true,
-    browser: ['Kendali Bot Control', 'Chrome', '1.0.0'],
+    browser: ['Verand Bot Control', 'Chrome', '1.0.0'],
   });
 
   sock.ev.on('creds.update', saveCreds);

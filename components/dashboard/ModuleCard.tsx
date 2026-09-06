@@ -220,7 +220,7 @@ export default function ModuleCard({ feature }: ModuleCardProps) {
                     type="text"
                     value={packName}
                     onChange={(e) => setPackName(e.target.value)}
-                    placeholder="Kendali Pack"
+                    placeholder="Verand Pack"
                     className="w-full px-3 py-1.5 rounded-lg bg-panel-800 border border-panel-700 text-white focus:border-circuit-500 focus:outline-none"
                   />
                 </div>
@@ -232,7 +232,7 @@ export default function ModuleCard({ feature }: ModuleCardProps) {
                     type="text"
                     value={authorName}
                     onChange={(e) => setAuthorName(e.target.value)}
-                    placeholder="Made with Kendali.Bot"
+                    placeholder="Made with Verand.Bot"
                     className="w-full px-3 py-1.5 rounded-lg bg-panel-800 border border-panel-700 text-white focus:border-circuit-500 focus:outline-none"
                   />
                 </div>

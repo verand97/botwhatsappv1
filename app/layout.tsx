@@ -21,7 +21,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Kendali.Bot — Dashboard & Control Room Bot WhatsApp Multifungsi",
+  title: "Verand.Bot — Dashboard & Control Room Bot WhatsApp Multifungsi",
   description: "Platform kontrol visual untuk menghubungkan dan mengelola bot WhatsApp personal & komunitas: Stiker maker, downloader, auto-reply, grup tools, dan AI chat.",
 };
 

@@ -45,7 +45,7 @@ export default function Header({ onOpenSimulator, simulatorOpen }: HeaderProps) 
             </div>
             <div className="flex flex-col">
               <span className="font-display font-bold text-base tracking-wide text-white flex items-center gap-1.5">
-                KENDALI<span className="text-circuit-500">.BOT</span>
+                VERAND<span className="text-circuit-500">.BOT</span>
                 <span className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-panel-800 text-gray-400 border border-panel-700">
                   v1.2-core
                 </span>

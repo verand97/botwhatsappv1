@@ -25,8 +25,8 @@ const DEFAULT_FEATURES: FeatureConfig[] = [
     command_trigger: '!sticker',
     aliases: ['!s', '!stiker', '!swm'],
     extra_settings: {
-      pack_name: 'Kendali Pack',
-      author_name: 'Made with Kendali.Bot',
+      pack_name: 'Verand Pack',
+      author_name: 'Made with Verand.Bot',
       max_duration_sec: 10,
       quality: 'high',
     },
@@ -68,8 +68,8 @@ const DEFAULT_FEATURES: FeatureConfig[] = [
     aliases: ['!auto', '!info'],
     extra_settings: {
       auto_replies: [
-        { trigger: 'halo', response: 'Halo! Bot Kendali aktif 24/7. Ketik !menu untuk melihat fitur.' },
-        { trigger: 'info', response: 'Kendali.Bot adalah platform kendali bot WhatsApp multifungsi.' },
+        { trigger: 'halo', response: 'Halo! Bot Verand aktif 24/7. Ketik !menu untuk melihat fitur.' },
+        { trigger: 'info', response: 'Verand.Bot adalah platform kendali bot WhatsApp multifungsi.' },
       ],
     },
   },
@@ -228,7 +228,7 @@ class BotManager {
         auth: state,
         printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
-        browser: ['Kendali Control Room', 'Chrome', '120.0.0'],
+        browser: ['Verand Control Room', 'Chrome', '120.0.0'],
       });
 
       this.sock.ev.on('creds.update', saveCreds);
@@ -261,7 +261,7 @@ class BotManager {
             : cleanNum;
 
           this.nomorWa = masked;
-          this.pushName = this.sock?.user?.name || 'Kendali Bot';
+          this.pushName = this.sock?.user?.name || 'Verand Bot';
 
           this.addLog({
             feature_key: 'system',
@@ -404,8 +404,8 @@ class BotManager {
           .toBuffer();
 
         // Inject EXIF Pack and Author Name (§5.1 & §10)
-        const packName = stickerFeat.extra_settings.pack_name || 'Kendali Pack';
-        const authorName = stickerFeat.extra_settings.author_name || 'Kendali.Bot';
+        const packName = stickerFeat.extra_settings.pack_name || 'Verand Pack';
+        const authorName = stickerFeat.extra_settings.author_name || 'Verand.Bot';
         const finalSticker = await addExifToWebp(webpBuffer, packName, authorName);
 
         // Send Sticker back
@@ -513,7 +513,7 @@ class BotManager {
         .map((f) => `• *${f.command_trigger}* : ${f.name}`)
         .join('\n');
 
-      const menuText = `⚙️ *KENDALI.BOT — PUSAT KONTROL*\nStatus: ONLINE 🟢\nPrefix: [ ${prefix} ]\n\n*Daftar Modul Aktif:*\n${activeList}\n\nKirim perintah di atas untuk berinteraksi!`;
+      const menuText = `⚙️ *VERAND.BOT — PUSAT KONTROL*\nStatus: ONLINE 🟢\nPrefix: [ ${prefix} ]\n\n*Daftar Modul Aktif:*\n${activeList}\n\nKirim perintah di atas untuk berinteraksi!`;
 
       await this.sock.sendMessage(remoteJid, { text: menuText }, { quoted: msg });
 
@@ -538,7 +538,7 @@ class BotManager {
         aiFeat.aliases.some((a) => lower.startsWith(a)))
     ) {
       const prompt = cleanText.replace(aiFeat.command_trigger, '').trim();
-      const reply = `🤖 *Kendali AI*: Terima kasih atas pertanyaanmu: "${prompt || '...'}"\n\nSistem Kendali.Bot telah memproses permintaanmu secara langsung dari server. Fitur bot WhatsApp ini beroperasi melalui socket Baileys multi-device. Ada hal lain yang ingin kamu tanyakan?`;
+      const reply = `🤖 *Verand AI*: Terima kasih atas pertanyaanmu: "${prompt || '...'}"\n\nSistem Verand.Bot telah memproses permintaanmu secara langsung dari server. Fitur bot WhatsApp ini beroperasi melalui socket Baileys multi-device. Ada hal lain yang ingin kamu tanyakan?`;
 
       await this.sock.sendMessage(remoteJid, { text: reply }, { quoted: msg });
 

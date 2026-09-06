@@ -6,15 +6,15 @@ import webpmux from 'node-webpmux';
  */
 export async function addExifToWebp(
   webpBuffer: Buffer,
-  packName: string = 'Kendali Pack',
-  author: string = 'Kendali.Bot'
+  packName: string = 'Verand Pack',
+  author: string = 'Verand.Bot'
 ): Promise<Buffer> {
   try {
     const img = new webpmux.Image();
     await img.load(webpBuffer);
 
     const json = {
-      'sticker-pack-id': 'com.kendali.bot.' + Date.now(),
+      'sticker-pack-id': 'com.verand.bot.' + Date.now(),
       'sticker-pack-name': packName,
       'sticker-pack-publisher': author,
       'emojis': ['🤖', '✨', '⚡'],

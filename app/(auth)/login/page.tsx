@@ -7,7 +7,7 @@ import { Cpu, ArrowRight, Lock, Mail, Sparkles, ShieldCheck } from 'lucide-react
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('demo@kendalibot.local');
+  const [email, setEmail] = useState('demo@verandbot.local');
   const [password, setPassword] = useState('••••••••••••');
   const [loading, setLoading] = useState(false);
 
@@ -38,7 +38,7 @@ export default function LoginPage() {
             <Cpu className="w-6 h-6" />
           </Link>
           <h1 className="font-display font-bold text-2xl text-white tracking-tight">
-            Masuk ke Pusat Kendali
+            Masuk ke Verand.Bot
           </h1>
           <p className="text-xs text-gray-400">
             Akses dashboard visual untuk mengatur bot WhatsApp Anda

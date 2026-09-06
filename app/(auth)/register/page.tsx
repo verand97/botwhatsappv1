@@ -32,7 +32,7 @@ export default function RegisterPage() {
             <Cpu className="w-6 h-6" />
           </Link>
           <h1 className="font-display font-bold text-2xl text-white tracking-tight">
-            Buat Akun Kendali.Bot
+            Buat Akun Verand.Bot
           </h1>
           <p className="text-xs text-gray-400">
             Daftar untuk mengelola dan memonitor bot WhatsApp pribadi Anda

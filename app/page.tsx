@@ -32,7 +32,7 @@ export default function LandingPage() {
             </div>
             <div>
               <span className="font-display font-bold text-lg tracking-wide text-white flex items-center gap-1.5">
-                KENDALI<span className="text-circuit-500">.BOT</span>
+                VERAND<span className="text-circuit-500">.BOT</span>
               </span>
               <span className="text-[11px] font-mono text-gray-400">
                 Control Room Platform
@@ -136,7 +136,7 @@ export default function LandingPage() {
               <div className="w-3 h-3 rounded-full bg-alert-500/80" />
               <div className="w-3 h-3 rounded-full bg-module-amber/80" />
               <div className="w-3 h-3 rounded-full bg-live-400/80" />
-              <span className="font-mono text-gray-400 ml-2">kendali-control-room.app / dashboard</span>
+              <span className="font-mono text-gray-400 ml-2">verand-control-room.app / dashboard</span>
             </div>
             <span className="font-mono text-live-400 flex items-center gap-1.5 text-[11px]">
               <span className="w-2 h-2 rounded-full bg-live-400 animate-ping" />
@@ -334,7 +334,7 @@ export default function LandingPage() {
               <span>Komitmen Privasi &amp; Kepatuhan Anti-Banned (§8)</span>
             </div>
             <p className="text-xs text-gray-300 leading-relaxed">
-              Platform Kendali.Bot secara ketat membatasi pengiriman pesan dengan <strong>Adaptive Rate Limiting (default 3–5 detik)</strong> dan <strong>masking nomor pengirim</strong> (<code className="text-circuit-400 font-mono">62812***456</code>). Dirancang khusus untuk komunitas kecil dan otomasi personal yang bertanggung jawab.
+              Platform Verand.Bot secara ketat membatasi pengiriman pesan dengan <strong>Adaptive Rate Limiting (default 3–5 detik)</strong> dan <strong>masking nomor pengirim</strong> (<code className="text-circuit-400 font-mono">62812***456</code>). Dirancang khusus untuk komunitas kecil dan otomasi personal yang bertanggung jawab.
             </p>
           </div>
         </div>
@@ -345,7 +345,7 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <Cpu className="w-4 h-4 text-circuit-400" />
-            <span className="font-display font-bold text-white">KENDALI.BOT</span>
+            <span className="font-display font-bold text-white">VERAND.BOT</span>
             <span>&copy; 2026. Platform Kontrol Bot WhatsApp.</span>
           </div>
 

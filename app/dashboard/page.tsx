@@ -39,7 +39,7 @@ export default function DashboardOverviewPage() {
               </span>
             </div>
             <h1 className="font-display font-bold text-2xl sm:text-3xl text-white tracking-tight">
-              Pusat Kendali Bot WhatsApp
+              Pusat Kontrol Verand Bot WhatsApp
             </h1>
             <p className="text-xs sm:text-sm text-gray-300 max-w-2xl leading-relaxed">
               Pantau status koneksi socket WhatsApp, kelola modul fitur aktif (Stiker Maker, Downloader, AI Chat), dan amati log aktivitas secara real-time.

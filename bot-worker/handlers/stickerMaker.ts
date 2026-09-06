@@ -24,7 +24,7 @@ export async function handleStickerMaker(sock: WASocket, msg: proto.IWebMessageI
     const buffer = await downloadMediaMessage(msg, 'buffer', {});
 
     // Catatan: Pada server produksi, panggil wrapper sharp & node-webpmux:
-    // const webpSticker = await convertToWebP(buffer, { pack: "Kendali Pack", author: "Kendali.Bot" });
+    // const webpSticker = await convertToWebP(buffer, { pack: "Verand Pack", author: "Verand.Bot" });
 
     // Kirim stiker WebP kembali ke user
     await sock.sendMessage(remoteJid, {

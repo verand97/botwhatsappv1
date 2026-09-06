@@ -14,7 +14,7 @@ const REAL_INITIAL_BOT: BotInstance = {
   id: 'inst-core',
   nomor_wa: null,
   status: 'disconnected',
-  session_name: 'kendali_primary_worker',
+  session_name: 'verand_primary_worker',
   connected_at: null,
   battery_level: undefined,
   push_name: undefined,
@@ -32,8 +32,8 @@ const DEFAULT_REAL_FEATURES: FeatureConfig[] = [
     command_trigger: '!sticker',
     aliases: ['!s', '!stiker', '!swm'],
     extra_settings: {
-      pack_name: 'Kendali Pack',
-      author_name: 'Made with Kendali.Bot',
+      pack_name: 'Verand Pack',
+      author_name: 'Made with Verand.Bot',
       max_duration_sec: 10,
       quality: 'high',
     },
@@ -75,8 +75,8 @@ const DEFAULT_REAL_FEATURES: FeatureConfig[] = [
     aliases: ['!auto', '!info'],
     extra_settings: {
       auto_replies: [
-        { trigger: 'halo', response: 'Halo! Bot Kendali aktif 24/7. Ketik !menu untuk melihat fitur.' },
-        { trigger: 'info', response: 'Kendali.Bot adalah platform kendali bot WhatsApp multifungsi.' },
+        { trigger: 'halo', response: 'Halo! Bot Verand aktif 24/7. Ketik !menu untuk melihat fitur.' },
+        { trigger: 'info', response: 'Verand.Bot adalah platform kendali bot WhatsApp multifungsi.' },
       ],
     },
   },
@@ -412,7 +412,7 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
         .map((f) => `• ${f.command_trigger} : ${f.name}`)
         .join('\n');
       return {
-        response: `⚙️ *KENDALI.BOT — MENU AKTIF*\nStatus: ONLINE 🟢\nPrefix: [ ${prefix} ]\n\n*Daftar Modul:*\n${activeList}`,
+        response: `⚙️ *VERAND.BOT — MENU AKTIF*\nStatus: ONLINE 🟢\nPrefix: [ ${prefix} ]\n\n*Daftar Modul:*\n${activeList}`,
         success: true,
       };
     }
@@ -422,7 +422,7 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
     if (aiFeat && lower.startsWith(aiFeat.command_trigger)) {
       const prompt = cleanMsg.replace(aiFeat.command_trigger, '').trim();
       return {
-        response: `🤖 [Kendali AI]: Menjawab: "${prompt || '...'}"\n\nSistem beroperasi normal tanpa data dummy.`,
+        response: `🤖 [Verand AI]: Menjawab: "${prompt || '...'}"\n\nSistem beroperasi normal tanpa data dummy.`,
         success: true,
       };
     }

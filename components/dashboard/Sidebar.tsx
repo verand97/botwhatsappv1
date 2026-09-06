@@ -150,7 +150,7 @@ export default function Sidebar() {
           <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
         </Link>
         <div className="px-3 text-[10px] font-mono text-gray-400">
-          Kendali Control Room &copy; 2026
+          Verand Control Room &copy; 2026
         </div>
       </div>
     </aside>

@@ -198,7 +198,7 @@ export default function PengaturanPage() {
             <span>Kepatuhan Ketentuan Layanan WhatsApp (§1 &amp; §8)</span>
           </div>
           <p className="text-[11px] text-gray-400 leading-relaxed">
-            Layanan Kendali.Bot menggunakan pustaka open-source Baileys via protokol multi-device. Pengguna bertanggung jawab penuh atas penggunaan bot secara wajar untuk grup personal atau komunitas kecil, bukan broadcast massal/spam. Kami tidak menyimpan riwayat pesan teks pribadi di luar metadata audit.
+            Layanan Verand.Bot menggunakan pustaka open-source Baileys via protokol multi-device. Pengguna bertanggung jawab penuh atas penggunaan bot secara wajar untuk grup personal atau komunitas kecil, bukan broadcast massal/spam. Kami tidak menyimpan riwayat pesan teks pribadi di luar metadata audit.
           </p>
           <div className="flex items-center gap-3 pt-2 text-[11px] text-gray-400 font-mono">
             <span className="flex items-center gap-1">

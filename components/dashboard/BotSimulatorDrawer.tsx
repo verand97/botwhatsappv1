@@ -44,7 +44,7 @@ export default function BotSimulatorDrawer({
     {
       id: 'init-1',
       sender: 'bot',
-      text: '🤖 Kendali.Bot Simulator siap digunakan.\nKetik !menu untuk melihat perintah yang aktif di papan kendali Anda, atau coba perintah cepat di bawah.',
+      text: '🤖 Verand.Bot Simulator siap digunakan.\nKetik !menu untuk melihat perintah yang aktif di papan kendali Anda, atau coba perintah cepat di bawah.',
       timestamp: new Date().toLocaleTimeString('id-ID', {
         hour: '2-digit',
         minute: '2-digit',
