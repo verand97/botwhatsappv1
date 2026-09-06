@@ -105,7 +105,7 @@ const DEFAULT_FEATURES: FeatureConfig[] = [
 
 const DEFAULT_RATE_LIMIT: RateLimitConfig = {
   cooldown_seconds: 3,
-  command_prefix: '!',
+  command_prefix: '/',
   max_per_minute: 20,
   anti_spam_active: true,
   blacklisted_senders: [],
@@ -129,11 +129,57 @@ class BotManager {
   private stickersCountToday = 0;
   private isConnecting = false;
   private authDir: string;
+  private configFile: string;
 
   constructor() {
     this.authDir = path.join(process.cwd(), 'sessions', 'baileys_auth');
+    this.configFile = path.join(process.cwd(), 'sessions', 'bot_config.json');
     if (!fs.existsSync(this.authDir)) {
       fs.mkdirSync(this.authDir, { recursive: true });
+    }
+
+    this.loadConfig();
+
+    // Auto-reconnect if session credentials exist
+    const credsPath = path.join(this.authDir, 'creds.json');
+    if (fs.existsSync(credsPath)) {
+      setTimeout(() => {
+        this.startBot().catch((e) => console.error('Auto-start Baileys error:', e));
+      }, 500);
+    }
+  }
+
+  private loadConfig() {
+    try {
+      if (fs.existsSync(this.configFile)) {
+        const data = JSON.parse(fs.readFileSync(this.configFile, 'utf-8'));
+        if (data.features) this.features = data.features;
+        if (data.rateLimit) this.rateLimit = data.rateLimit;
+      }
+    } catch (e) {
+      console.error('Error loading config:', e);
+    }
+  }
+
+  private saveConfig() {
+    try {
+      const sessDir = path.join(process.cwd(), 'sessions');
+      if (!fs.existsSync(sessDir)) {
+        fs.mkdirSync(sessDir, { recursive: true });
+      }
+      fs.writeFileSync(
+        this.configFile,
+        JSON.stringify(
+          {
+            features: this.features,
+            rateLimit: this.rateLimit,
+          },
+          null,
+          2
+        )
+      );
+    } catch (e) {
+      console.error('Error saving config:', e);
     }
   }
 
@@ -181,16 +227,19 @@ class BotManager {
       }
       return f;
     });
+    this.saveConfig();
     return this.features;
   }
 
   public updateFeature(id: string, updates: Partial<FeatureConfig>) {
     this.features = this.features.map((f) => (f.id === id ? { ...f, ...updates } : f));
+    this.saveConfig();
     return this.features;
   }
 
   public updateRateLimit(updates: Partial<RateLimitConfig>) {
     this.rateLimit = { ...this.rateLimit, ...updates };
+    this.saveConfig();
     return this.rateLimit;
   }
 
