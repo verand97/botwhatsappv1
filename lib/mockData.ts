@@ -4,10 +4,10 @@ export const INITIAL_BOT_INSTANCE: BotInstance = {
   id: 'inst-7881-bd92',
   nomor_wa: '+62 812-***-9081',
   status: 'connected',
-  session_name: 'kendali_primary_worker',
+  session_name: 'verand_primary_worker',
   connected_at: new Date(Date.now() - 3600000 * 4).toISOString(),
   battery_level: 92,
-  push_name: 'Kendali Assistant',
+  push_name: 'Verand Assistant',
   uptime_seconds: 14420,
 };
 
@@ -22,8 +22,8 @@ export const INITIAL_FEATURES: FeatureConfig[] = [
     command_trigger: '!sticker',
     aliases: ['!s', '!stiker', '!swm'],
     extra_settings: {
-      pack_name: 'Kendali Pack',
-      author_name: 'Made with Kendali.Bot',
+      pack_name: 'Verand Pack',
+      author_name: 'Made with Verand.Bot',
       max_duration_sec: 10,
       quality: 'high',
     },
@@ -65,8 +65,8 @@ export const INITIAL_FEATURES: FeatureConfig[] = [
     aliases: ['!auto', '!info'],
     extra_settings: {
       auto_replies: [
-        { trigger: 'halo', response: 'Halo! Bot Kendali aktif 24/7. Ketik !menu untuk melihat fitur.' },
-        { trigger: 'harga', response: 'Layanan bot Kendali tersedia paket personal gratis & tier komunitas.' },
+        { trigger: 'halo', response: 'Halo! Verand Bot aktif 24/7. Ketik !menu untuk melihat fitur.' },
+        { trigger: 'harga', response: 'Layanan Verand Bot tersedia paket personal gratis & tier komunitas.' },
         { trigger: 'rules', response: 'Harap patuhi aturan grup: dilarang spam, dilarang kirim konten terlarang.' },
       ],
     },
@@ -136,7 +136,7 @@ export const INITIAL_LOGS: ActivityLog[] = [
     status: 'success',
     execution_time_ms: 240,
     created_at: new Date(Date.now() - 45000).toISOString(),
-    detail: 'WebP 512x512 with EXIF [Kendali Pack / Kendali.Bot] sent.',
+    detail: 'WebP 512x512 with EXIF [Verand Pack / Verand.Bot] sent.',
   },
   {
     id: 'log-102',

@@ -223,7 +223,7 @@ export default function LandingPage() {
               Modul Fungsionalitas Siap Pakai
             </h2>
             <p className="text-xs sm:text-sm text-gray-400">
-              Semua modul dapat dinyalakan atau dimatikan kapan saja secara modular dari papan kendali Anda.
+              Semua modul dapat dinyalakan atau dimatikan kapan saja secara modular dari papan kontrol Verand Bot Anda.
             </p>
           </div>
 

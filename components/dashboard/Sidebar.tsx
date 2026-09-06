@@ -82,7 +82,7 @@ export default function Sidebar() {
         {/* Navigation Group */}
         <div>
           <div className="px-3 mb-2 text-[11px] font-mono uppercase tracking-wider text-gray-400">
-            Pusat Kendali
+            Menu Verand Bot
           </div>
           <nav className="space-y-1">
             {navItems.map((item) => {

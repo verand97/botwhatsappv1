@@ -75,8 +75,8 @@ const DEFAULT_REAL_FEATURES: FeatureConfig[] = [
     aliases: ['!auto', '!info'],
     extra_settings: {
       auto_replies: [
-        { trigger: 'halo', response: 'Halo! Bot Verand aktif 24/7. Ketik !menu untuk melihat fitur.' },
-        { trigger: 'info', response: 'Verand.Bot adalah platform kendali bot WhatsApp multifungsi.' },
+        { trigger: 'halo', response: 'Halo! Verand Bot aktif 24/7. Ketik !menu untuk melihat fitur.' },
+        { trigger: 'info', response: 'Verand.Bot adalah platform bot WhatsApp multifungsi.' },
       ],
     },
   },
