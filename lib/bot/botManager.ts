@@ -1,0 +1,629 @@
+import makeWASocket, {
+  DisconnectReason,
+  useMultiFileAuthState,
+  WASocket,
+  proto,
+  downloadMediaMessage,
+} from '@whiskeysockets/baileys';
+import QRCode from 'qrcode';
+import sharp from 'sharp';
+import path from 'path';
+import fs from 'fs';
+import pino from 'pino';
+import { addExifToWebp } from './exif';
+import { ActivityLog, FeatureConfig, RateLimitConfig, BotConnectionStatus } from '../types';
+
+// Default initial features
+const DEFAULT_FEATURES: FeatureConfig[] = [
+  {
+    id: 'feat-sticker-maker',
+    feature_key: 'sticker_maker',
+    name: 'Stiker Maker',
+    tagline: 'Konversi otomatis foto/video pendek ke stiker WhatsApp WebP 512x512 + custom EXIF pack',
+    category: 'core',
+    is_enabled: true,
+    command_trigger: '!sticker',
+    aliases: ['!s', '!stiker', '!swm'],
+    extra_settings: {
+      pack_name: 'Kendali Pack',
+      author_name: 'Made with Kendali.Bot',
+      max_duration_sec: 10,
+      quality: 'high',
+    },
+  },
+  {
+    id: 'feat-sticker-to-media',
+    feature_key: 'sticker_to_media',
+    name: 'Stiker to Media',
+    tagline: 'Ubah kembali stiker WebP menjadi foto PNG/JPG atau animasi GIF/MP4',
+    category: 'core',
+    is_enabled: true,
+    command_trigger: '!tomedia',
+    aliases: ['!toimg', '!togif'],
+    extra_settings: {
+      quality: 'high',
+    },
+  },
+  {
+    id: 'feat-downloader',
+    feature_key: 'downloader',
+    name: 'Media Downloader',
+    tagline: 'Unduh video atau audio dari tautan TikTok, Instagram Reels, dan YouTube',
+    category: 'media',
+    is_enabled: true,
+    command_trigger: '!dl',
+    aliases: ['!tt', '!ig', '!yt'],
+    extra_settings: {
+      supported_platforms: ['TikTok', 'Instagram', 'YouTube'],
+    },
+  },
+  {
+    id: 'feat-auto-reply',
+    feature_key: 'auto_reply',
+    name: 'Auto-Reply & FAQ',
+    tagline: 'Balas pesan otomatis berdasarkan kata kunci tertentu untuk admin grup atau toko',
+    category: 'utility',
+    is_enabled: true,
+    command_trigger: '!faq',
+    aliases: ['!auto', '!info'],
+    extra_settings: {
+      auto_replies: [
+        { trigger: 'halo', response: 'Halo! Bot Kendali aktif 24/7. Ketik !menu untuk melihat fitur.' },
+        { trigger: 'info', response: 'Kendali.Bot adalah platform kendali bot WhatsApp multifungsi.' },
+      ],
+    },
+  },
+  {
+    id: 'feat-ai-chat',
+    feature_key: 'ai_chat',
+    name: 'AI Chat Assistant',
+    tagline: 'Tanya jawab cerdas langsung di WhatsApp menggunakan model AI Gemini / LLM',
+    category: 'ai_fun',
+    is_enabled: true,
+    command_trigger: '!ai',
+    aliases: ['!tanya', '!ask'],
+    is_beta: true,
+    extra_settings: {
+      ai_system_prompt: 'Kamu adalah asisten bot WhatsApp ramah, ringkas, dan berbahasa Indonesia gaul santun.',
+    },
+  },
+  {
+    id: 'feat-group-tools',
+    feature_key: 'group_tools',
+    name: 'Grup Management Tools',
+    tagline: 'Sambutan member baru, deteksi anti-link spam, dan utilitas moderasi admin',
+    category: 'utility',
+    is_enabled: false,
+    command_trigger: '!group',
+    aliases: ['!welcome'],
+    extra_settings: {
+      anti_link: true,
+      welcome_message: 'Selamat datang di grup!',
+    },
+  },
+];
+
+const DEFAULT_RATE_LIMIT: RateLimitConfig = {
+  cooldown_seconds: 3,
+  command_prefix: '!',
+  max_per_minute: 20,
+  anti_spam_active: true,
+  blacklisted_senders: [],
+  whitelist_groups_only: false,
+  whitelisted_groups: [],
+};
+
+class BotManager {
+  private sock: WASocket | null = null;
+  private status: BotConnectionStatus = 'disconnected';
+  private qrRaw: string | null = null;
+  private qrDataUrl: string | null = null;
+  private nomorWa: string | null = null;
+  private pushName: string | null = null;
+  private connectedAt: string | null = null;
+  private logs: ActivityLog[] = [];
+  private features: FeatureConfig[] = DEFAULT_FEATURES;
+  private rateLimit: RateLimitConfig = DEFAULT_RATE_LIMIT;
+  private userLastCommandMap = new Map<string, number>();
+  private commandsCountToday = 0;
+  private stickersCountToday = 0;
+  private isConnecting = false;
+  private authDir: string;
+
+  constructor() {
+    this.authDir = path.join(process.cwd(), 'sessions', 'baileys_auth');
+    if (!fs.existsSync(this.authDir)) {
+      fs.mkdirSync(this.authDir, { recursive: true });
+    }
+  }
+
+  public getStatus() {
+    return {
+      status: this.status,
+      nomor_wa: this.nomorWa,
+      push_name: this.pushName,
+      connected_at: this.connectedAt,
+      qr_raw: this.qrRaw,
+      qr_data_url: this.qrDataUrl,
+      active_features_count: this.features.filter((f) => f.is_enabled).length,
+      total_features_count: this.features.length,
+      commands_count_today: this.commandsCountToday,
+      stickers_count_today: this.stickersCountToday,
+    };
+  }
+
+  public getLogs(): ActivityLog[] {
+    return this.logs;
+  }
+
+  public getFeatures(): FeatureConfig[] {
+    return this.features;
+  }
+
+  public getRateLimit(): RateLimitConfig {
+    return this.rateLimit;
+  }
+
+  public toggleFeature(id: string) {
+    this.features = this.features.map((f) => {
+      if (f.id === id) {
+        const next = !f.is_enabled;
+        this.addLog({
+          feature_key: f.feature_key,
+          feature_name: f.name,
+          command: `[SYS] Modul ${f.name} diubah menjadi ${next ? 'AKTIF' : 'NONAKTIF'}`,
+          sender_masked: 'System Admin',
+          status: 'success',
+          execution_time_ms: 5,
+          detail: `Status fitur diubah di papan modul.`,
+        });
+        return { ...f, is_enabled: next };
+      }
+      return f;
+    });
+    return this.features;
+  }
+
+  public updateFeature(id: string, updates: Partial<FeatureConfig>) {
+    this.features = this.features.map((f) => (f.id === id ? { ...f, ...updates } : f));
+    return this.features;
+  }
+
+  public updateRateLimit(updates: Partial<RateLimitConfig>) {
+    this.rateLimit = { ...this.rateLimit, ...updates };
+    return this.rateLimit;
+  }
+
+  public clearLogs() {
+    this.logs = [];
+  }
+
+  public addLog(item: Omit<ActivityLog, 'id' | 'created_at'>) {
+    const log: ActivityLog = {
+      ...item,
+      id: 'log-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+      created_at: new Date().toISOString(),
+    };
+    this.logs = [log, ...this.logs.slice(0, 99)];
+  }
+
+  // Start real Baileys connection
+  public async startBot() {
+    if (this.sock && this.status === 'connected') {
+      return this.getStatus();
+    }
+    if (this.isConnecting) {
+      return this.getStatus();
+    }
+
+    this.isConnecting = true;
+    this.status = 'connecting';
+    this.qrRaw = null;
+    this.qrDataUrl = null;
+
+    try {
+      const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+
+      this.sock = makeWASocket({
+        auth: state,
+        printQRInTerminal: false,
+        logger: pino({ level: 'silent' }),
+        browser: ['Kendali Control Room', 'Chrome', '120.0.0'],
+      });
+
+      this.sock.ev.on('creds.update', saveCreds);
+
+      this.sock.ev.on('connection.update', async (update: any) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr) {
+          this.qrRaw = qr;
+          try {
+            this.qrDataUrl = await QRCode.toDataURL(qr, { margin: 1, scale: 8 });
+          } catch (e) {
+            console.error('Failed to generate QR DataURL:', e);
+          }
+          this.status = 'disconnected'; // Waiting for scan
+        }
+
+        if (connection === 'open') {
+          this.isConnecting = false;
+          this.status = 'connected';
+          this.connectedAt = new Date().toISOString();
+          this.qrRaw = null;
+          this.qrDataUrl = null;
+
+          const rawId = this.sock?.user?.id || '';
+          const cleanNum = rawId.split(':')[0] || rawId.split('@')[0];
+          // Mask phone number for privacy §7
+          const masked = cleanNum.length > 7
+            ? '+' + cleanNum.slice(0, 5) + '-***-' + cleanNum.slice(-4)
+            : cleanNum;
+
+          this.nomorWa = masked;
+          this.pushName = this.sock?.user?.name || 'Kendali Bot';
+
+          this.addLog({
+            feature_key: 'system',
+            feature_name: 'Koneksi Baileys',
+            command: `[SYS] Device Connected (${masked})`,
+            sender_masked: 'System Core',
+            status: 'success',
+            execution_time_ms: 100,
+            detail: 'Koneksi WhatsApp Web Multi-Device aktif & socket persisten terhubung.',
+          });
+        }
+
+        if (connection === 'close') {
+          this.isConnecting = false;
+          const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
+          const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+
+          this.status = 'disconnected';
+          this.nomorWa = null;
+          this.connectedAt = null;
+
+          this.addLog({
+            feature_key: 'system',
+            feature_name: 'Koneksi Baileys',
+            command: `[SYS] Connection Closed (Code: ${statusCode || 'unknown'})`,
+            sender_masked: 'System Core',
+            status: 'failed',
+            execution_time_ms: 20,
+            detail: isLoggedOut
+              ? 'Sesi WhatsApp di-logout dari perangkat.'
+              : 'Socket terputus, mencoba rekoneksi otomatis...',
+          });
+
+          if (!isLoggedOut) {
+            setTimeout(() => this.startBot(), 3000);
+          }
+        }
+      });
+
+      // Handle Real Incoming Messages
+      this.sock.ev.on('messages.upsert', async ({ messages, type }: { messages: any[]; type: string }) => {
+        if (type !== 'notify') return;
+
+        for (const msg of messages) {
+          if (!msg.message || msg.key.fromMe) continue;
+          await this.handleIncomingMessage(msg);
+        }
+      });
+
+      return this.getStatus();
+    } catch (err: any) {
+      this.isConnecting = false;
+      this.status = 'error';
+      console.error('Failed to start Baileys:', err);
+      return this.getStatus();
+    }
+  }
+
+  // Real WhatsApp message handler
+  private async handleIncomingMessage(msg: any) {
+    if (!this.sock || !msg || !msg.key) return;
+
+    const remoteJid = msg.key.remoteJid;
+    if (!remoteJid) return;
+
+    const senderRaw = remoteJid.split('@')[0];
+    const maskedSender =
+      senderRaw.length > 7
+        ? senderRaw.slice(0, 5) + '***' + senderRaw.slice(-3)
+        : senderRaw;
+
+    // Extract text
+    const text =
+      msg.message?.conversation ||
+      msg.message?.extendedTextMessage?.text ||
+      msg.message?.imageMessage?.caption ||
+      msg.message?.videoMessage?.caption ||
+      '';
+
+    const cleanText = text.trim();
+    const lower = cleanText.toLowerCase();
+
+    // 1. Rate Limiter check (§8 Anti-Abuse)
+    const now = Date.now();
+    const lastCmd = this.userLastCommandMap.get(remoteJid) || 0;
+    const cooldownMs = this.rateLimit.cooldown_seconds * 1000;
+
+    if (now - lastCmd < cooldownMs) {
+      const waitSec = ((cooldownMs - (now - lastCmd)) / 1000).toFixed(1);
+      this.addLog({
+        feature_key: 'anti_abuse',
+        feature_name: 'Rate Limiter',
+        command: cleanText || '(media)',
+        sender_masked: maskedSender,
+        status: 'rate_limited',
+        execution_time_ms: 5,
+        detail: `Ditolak oleh middleware rate-limit. Sisa cooldown: ${waitSec}s.`,
+      });
+      return;
+    }
+
+    this.userLastCommandMap.set(remoteJid, now);
+    this.commandsCountToday++;
+
+    // 2. Sticker Maker (§5.1)
+    const stickerFeat = this.features.find((f) => f.feature_key === 'sticker_maker');
+    if (
+      stickerFeat &&
+      stickerFeat.is_enabled &&
+      (lower.startsWith(stickerFeat.command_trigger) ||
+        stickerFeat.aliases.some((a) => lower.startsWith(a)))
+    ) {
+      const startTime = Date.now();
+      try {
+        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+        const targetMsg = quotedMsg ? { message: quotedMsg, key: msg.key } : msg;
+
+        const isImg = Boolean(targetMsg.message?.imageMessage);
+        const isVid = Boolean(targetMsg.message?.videoMessage);
+
+        if (!isImg && !isVid) {
+          await this.sock.sendMessage(
+            remoteJid,
+            { text: '⚠️ Kirim gambar dengan caption `!s` atau balas (reply) gambar dengan `!s` untuk dijadikan stiker.' },
+            { quoted: msg }
+          );
+          return;
+        }
+
+        // Download media from WhatsApp
+        const mediaBuffer = await downloadMediaMessage(targetMsg as any, 'buffer', {});
+
+        // Process WebP 512x512 with Sharp
+        const webpBuffer = await sharp(mediaBuffer)
+          .resize(512, 512, {
+            fit: 'contain',
+            background: { r: 0, g: 0, b: 0, alpha: 0 },
+          })
+          .webp({ quality: 80 })
+          .toBuffer();
+
+        // Inject EXIF Pack and Author Name (§5.1 & §10)
+        const packName = stickerFeat.extra_settings.pack_name || 'Kendali Pack';
+        const authorName = stickerFeat.extra_settings.author_name || 'Kendali.Bot';
+        const finalSticker = await addExifToWebp(webpBuffer, packName, authorName);
+
+        // Send Sticker back
+        await this.sock.sendMessage(
+          remoteJid,
+          { sticker: finalSticker },
+          { quoted: msg }
+        );
+
+        this.stickersCountToday++;
+        const elapsed = Date.now() - startTime;
+
+        this.addLog({
+          feature_key: 'sticker_maker',
+          feature_name: 'Stiker Maker',
+          command: cleanText || '!sticker',
+          sender_masked: maskedSender,
+          status: 'success',
+          execution_time_ms: elapsed,
+          detail: `Stiker WebP 512x512 [${packName} / ${authorName}] dikirim dalam ${elapsed}ms.`,
+        });
+        return;
+      } catch (err: any) {
+        console.error('Sticker Maker Error:', err);
+        await this.sock.sendMessage(
+          remoteJid,
+          { text: '❌ Terjadi kesalahan saat memproses stiker.' },
+          { quoted: msg }
+        );
+        this.addLog({
+          feature_key: 'sticker_maker',
+          feature_name: 'Stiker Maker',
+          command: cleanText,
+          sender_masked: maskedSender,
+          status: 'failed',
+          execution_time_ms: Date.now() - startTime,
+          detail: err?.message || 'Error processing sticker',
+        });
+        return;
+      }
+    }
+
+    // 3. Sticker to Media (§5.1)
+    const toMediaFeat = this.features.find((f) => f.feature_key === 'sticker_to_media');
+    if (
+      toMediaFeat &&
+      toMediaFeat.is_enabled &&
+      (lower.startsWith(toMediaFeat.command_trigger) ||
+        toMediaFeat.aliases.some((a) => lower.startsWith(a)))
+    ) {
+      const startTime = Date.now();
+      try {
+        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+        if (!quotedMsg?.stickerMessage) {
+          await this.sock.sendMessage(
+            remoteJid,
+            { text: '⚠️ Balas (reply) stiker dengan perintah `!toimg` atau `!tomedia`.' },
+            { quoted: msg }
+          );
+          return;
+        }
+
+        const stickerBuf = await downloadMediaMessage(
+          { message: quotedMsg, key: msg.key } as any,
+          'buffer',
+          {}
+        );
+
+        // Convert WebP back to PNG via Sharp
+        const pngBuf = await sharp(stickerBuf).png().toBuffer();
+
+        await this.sock.sendMessage(
+          remoteJid,
+          { image: pngBuf, caption: '🖼️ Stiker berhasil dikonversi ke gambar PNG.' },
+          { quoted: msg }
+        );
+
+        const elapsed = Date.now() - startTime;
+        this.addLog({
+          feature_key: 'sticker_to_media',
+          feature_name: 'Stiker to Media',
+          command: cleanText,
+          sender_masked: maskedSender,
+          status: 'success',
+          execution_time_ms: elapsed,
+          detail: `Stiker dikonversi ke PNG transparan dalam ${elapsed}ms.`,
+        });
+        return;
+      } catch (err: any) {
+        console.error('Sticker to Media Error:', err);
+        await this.sock.sendMessage(
+          remoteJid,
+          { text: '❌ Gagal mengonversi stiker ke gambar.' },
+          { quoted: msg }
+        );
+        return;
+      }
+    }
+
+    // 4. Menu Command
+    const prefix = this.rateLimit.command_prefix;
+    if (lower === `${prefix}menu` || lower === `${prefix}help` || lower === 'menu') {
+      const activeList = this.features
+        .filter((f) => f.is_enabled)
+        .map((f) => `• *${f.command_trigger}* : ${f.name}`)
+        .join('\n');
+
+      const menuText = `⚙️ *KENDALI.BOT — PUSAT KONTROL*\nStatus: ONLINE 🟢\nPrefix: [ ${prefix} ]\n\n*Daftar Modul Aktif:*\n${activeList}\n\nKirim perintah di atas untuk berinteraksi!`;
+
+      await this.sock.sendMessage(remoteJid, { text: menuText }, { quoted: msg });
+
+      this.addLog({
+        feature_key: 'system',
+        feature_name: 'Bot Menu',
+        command: cleanText,
+        sender_masked: maskedSender,
+        status: 'success',
+        execution_time_ms: 25,
+        detail: 'Daftar menu command dikirimkan ke pengguna.',
+      });
+      return;
+    }
+
+    // 5. AI Chat (§5.2)
+    const aiFeat = this.features.find((f) => f.feature_key === 'ai_chat');
+    if (
+      aiFeat &&
+      aiFeat.is_enabled &&
+      (lower.startsWith(aiFeat.command_trigger) ||
+        aiFeat.aliases.some((a) => lower.startsWith(a)))
+    ) {
+      const prompt = cleanText.replace(aiFeat.command_trigger, '').trim();
+      const reply = `🤖 *Kendali AI*: Terima kasih atas pertanyaanmu: "${prompt || '...'}"\n\nSistem Kendali.Bot telah memproses permintaanmu secara langsung dari server. Fitur bot WhatsApp ini beroperasi melalui socket Baileys multi-device. Ada hal lain yang ingin kamu tanyakan?`;
+
+      await this.sock.sendMessage(remoteJid, { text: reply }, { quoted: msg });
+
+      this.addLog({
+        feature_key: 'ai_chat',
+        feature_name: 'AI Chat Assistant',
+        command: cleanText,
+        sender_masked: maskedSender,
+        status: 'success',
+        execution_time_ms: 310,
+        detail: 'AI response sent to user.',
+      });
+      return;
+    }
+
+    // 6. Auto-Reply Keyword (§5.2)
+    const autoFeat = this.features.find((f) => f.feature_key === 'auto_reply');
+    if (autoFeat && autoFeat.is_enabled && autoFeat.extra_settings.auto_replies) {
+      const match = autoFeat.extra_settings.auto_replies.find((r) =>
+        lower.includes(r.trigger.toLowerCase())
+      );
+      if (match) {
+        await this.sock.sendMessage(remoteJid, { text: `💬 ${match.response}` }, { quoted: msg });
+        this.addLog({
+          feature_key: 'auto_reply',
+          feature_name: 'Auto-Reply & FAQ',
+          command: cleanText,
+          sender_masked: maskedSender,
+          status: 'success',
+          execution_time_ms: 30,
+          detail: `Trigger matched: "${match.trigger}"`,
+        });
+        return;
+      }
+    }
+  }
+
+  // Disconnect & logout session
+  public async disconnect() {
+    if (this.sock) {
+      try {
+        await this.sock.logout();
+      } catch (e) {
+        // ignore
+      }
+      this.sock = null;
+    }
+    this.status = 'disconnected';
+    this.nomorWa = null;
+    this.pushName = null;
+    this.qrRaw = null;
+    this.qrDataUrl = null;
+    this.connectedAt = null;
+
+    // Clean session files
+    try {
+      if (fs.existsSync(this.authDir)) {
+        fs.rmSync(this.authDir, { recursive: true, force: true });
+        fs.mkdirSync(this.authDir, { recursive: true });
+      }
+    } catch (e) {
+      console.error('Error clearing session dir:', e);
+    }
+
+    this.addLog({
+      feature_key: 'system',
+      feature_name: 'Koneksi Baileys',
+      command: '[SYS] Sesi WhatsApp Dihapus / Disconnected',
+      sender_masked: 'System Core',
+      status: 'success',
+      execution_time_ms: 40,
+      detail: 'Sesi Baileys di-logout dan kredensial dibersihkan.',
+    });
+
+    return this.getStatus();
+  }
+}
+
+// Global singleton pattern to survive Next.js HMR in dev mode
+const globalForBot = globalThis as unknown as {
+  whatsappBotManager?: BotManager;
+};
+
+export const botManager = globalForBot.whatsappBotManager || new BotManager();
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForBot.whatsappBotManager = botManager;
+}

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import {
   BotInstance,
   FeatureConfig,
@@ -8,13 +8,117 @@ import {
   RateLimitConfig,
   UsageStatPoint,
 } from '../types';
-import {
-  INITIAL_BOT_INSTANCE,
-  INITIAL_FEATURES,
-  INITIAL_LOGS,
-  INITIAL_RATE_LIMIT,
-  INITIAL_USAGE_STATS,
-} from '../mockData';
+
+// REAL initial state without any dummy / fake data
+const REAL_INITIAL_BOT: BotInstance = {
+  id: 'inst-core',
+  nomor_wa: null,
+  status: 'disconnected',
+  session_name: 'kendali_primary_worker',
+  connected_at: null,
+  battery_level: undefined,
+  push_name: undefined,
+  uptime_seconds: 0,
+};
+
+const DEFAULT_REAL_FEATURES: FeatureConfig[] = [
+  {
+    id: 'feat-sticker-maker',
+    feature_key: 'sticker_maker',
+    name: 'Stiker Maker',
+    tagline: 'Konversi otomatis foto/video pendek ke stiker WhatsApp WebP 512x512 + custom EXIF pack',
+    category: 'core',
+    is_enabled: true,
+    command_trigger: '!sticker',
+    aliases: ['!s', '!stiker', '!swm'],
+    extra_settings: {
+      pack_name: 'Kendali Pack',
+      author_name: 'Made with Kendali.Bot',
+      max_duration_sec: 10,
+      quality: 'high',
+    },
+  },
+  {
+    id: 'feat-sticker-to-media',
+    feature_key: 'sticker_to_media',
+    name: 'Stiker to Media',
+    tagline: 'Ubah kembali stiker WebP menjadi foto PNG/JPG atau animasi GIF/MP4',
+    category: 'core',
+    is_enabled: true,
+    command_trigger: '!tomedia',
+    aliases: ['!toimg', '!togif'],
+    extra_settings: {
+      quality: 'high',
+    },
+  },
+  {
+    id: 'feat-downloader',
+    feature_key: 'downloader',
+    name: 'Media Downloader',
+    tagline: 'Unduh video atau audio dari tautan TikTok, Instagram Reels, dan YouTube',
+    category: 'media',
+    is_enabled: true,
+    command_trigger: '!dl',
+    aliases: ['!tt', '!ig', '!yt'],
+    extra_settings: {
+      supported_platforms: ['TikTok', 'Instagram', 'YouTube'],
+    },
+  },
+  {
+    id: 'feat-auto-reply',
+    feature_key: 'auto_reply',
+    name: 'Auto-Reply & FAQ',
+    tagline: 'Balas pesan otomatis berdasarkan kata kunci tertentu untuk admin grup atau toko',
+    category: 'utility',
+    is_enabled: true,
+    command_trigger: '!faq',
+    aliases: ['!auto', '!info'],
+    extra_settings: {
+      auto_replies: [
+        { trigger: 'halo', response: 'Halo! Bot Kendali aktif 24/7. Ketik !menu untuk melihat fitur.' },
+        { trigger: 'info', response: 'Kendali.Bot adalah platform kendali bot WhatsApp multifungsi.' },
+      ],
+    },
+  },
+  {
+    id: 'feat-ai-chat',
+    feature_key: 'ai_chat',
+    name: 'AI Chat Assistant',
+    tagline: 'Tanya jawab cerdas langsung di WhatsApp menggunakan model AI Gemini / LLM',
+    category: 'ai_fun',
+    is_enabled: true,
+    command_trigger: '!ai',
+    aliases: ['!tanya', '!ask'],
+    is_beta: true,
+    extra_settings: {
+      ai_system_prompt: 'Kamu adalah asisten bot WhatsApp ramah, ringkas, dan berbahasa Indonesia gaul santun.',
+    },
+  },
+  {
+    id: 'feat-group-tools',
+    feature_key: 'group_tools',
+    name: 'Grup Management Tools',
+    tagline: 'Sambutan member baru, deteksi anti-link spam, dan utilitas moderasi admin',
+    category: 'utility',
+    is_enabled: false,
+    command_trigger: '!group',
+    aliases: ['!welcome'],
+    extra_settings: {
+      anti_link: true,
+      welcome_message: 'Selamat datang di grup!',
+    },
+  },
+];
+
+const DEFAULT_REAL_RATE_LIMIT: RateLimitConfig = {
+  cooldown_seconds: 3,
+  command_prefix: '!',
+  max_per_minute: 20,
+  anti_spam_active: true,
+  blacklisted_senders: [],
+  whitelist_groups_only: false,
+  whitelisted_groups: [],
+};
 
 interface BotContextType {
   botInstance: BotInstance;
@@ -22,18 +126,19 @@ interface BotContextType {
   logs: ActivityLog[];
   rateLimit: RateLimitConfig;
   stats: UsageStatPoint[];
+  qrDataUrl: string | null;
+  qrRaw: string | null;
+  isBackendConnected: boolean;
   // Actions
   toggleFeature: (featureId: string) => void;
   updateFeatureTrigger: (featureId: string, newTrigger: string) => void;
   updateFeatureSettings: (featureId: string, settings: any) => void;
-  connectBot: (nomorWa?: string) => void;
+  connectBot: () => void;
   disconnectBot: () => void;
   setConnecting: () => void;
   addLog: (log: Omit<ActivityLog, 'id' | 'created_at'>) => void;
   clearLogs: () => void;
   updateRateLimit: (updates: Partial<RateLimitConfig>) => void;
-  // Simulator helpers
-  lastExecutedTime: number;
   executeSimulatedCommand: (
     sender: string,
     messageText: string
@@ -43,122 +148,214 @@ interface BotContextType {
 const BotContext = createContext<BotContextType | undefined>(undefined);
 
 export function BotProvider({ children }: { children: React.ReactNode }) {
-  const [botInstance, setBotInstance] = useState<BotInstance>(INITIAL_BOT_INSTANCE);
-  const [features, setFeatures] = useState<FeatureConfig[]>(INITIAL_FEATURES);
-  const [logs, setLogs] = useState<ActivityLog[]>(INITIAL_LOGS);
-  const [rateLimit, setRateLimit] = useState<RateLimitConfig>(INITIAL_RATE_LIMIT);
-  const [stats] = useState<UsageStatPoint[]>(INITIAL_USAGE_STATS);
+  const [botInstance, setBotInstance] = useState<BotInstance>(REAL_INITIAL_BOT);
+  const [features, setFeatures] = useState<FeatureConfig[]>(DEFAULT_REAL_FEATURES);
+  const [logs, setLogs] = useState<ActivityLog[]>([]);
+  const [rateLimit, setRateLimit] = useState<RateLimitConfig>(DEFAULT_REAL_RATE_LIMIT);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [qrRaw, setQrRaw] = useState<string | null>(null);
+  const [isBackendConnected, setIsBackendConnected] = useState(false);
   const [lastExecutedTime, setLastExecutedTime] = useState<number>(0);
+  const [stats, setStats] = useState<UsageStatPoint[]>([
+    { date: 'Hari Ini', commands_count: 0, stickers_created: 0, media_downloaded: 0, ai_chats: 0 },
+  ]);
 
-  // Toggle module on/off
-  const toggleFeature = (featureId: string) => {
-    setFeatures((prev) =>
-      prev.map((f) => {
-        if (f.id === featureId) {
-          const nextState = !f.is_enabled;
-          // Log the toggle change
-          addLog({
-            feature_key: f.feature_key,
-            feature_name: f.name,
-            command: `[SYS] Module ${f.name} toggled ${nextState ? 'ON' : 'OFF'}`,
-            sender_masked: 'System Admin',
-            status: 'success',
-            execution_time_ms: 10,
-            detail: `Status fitur diubah menjadi ${nextState ? 'Aktif' : 'Nonaktif'} melalui panel kendali.`,
-          });
-          return { ...f, is_enabled: nextState };
-        }
-        return f;
-      })
-    );
-  };
+  // Sync real status from /api/bot
+  const syncFromBackend = useCallback(async () => {
+    try {
+      const res = await fetch('/api/bot', { cache: 'no-store' });
+      if (!res.ok) return;
+      const json = await res.json();
+      if (!json.success || !json.data) return;
 
-  const updateFeatureTrigger = (featureId: string, newTrigger: string) => {
-    setFeatures((prev) =>
-      prev.map((f) =>
-        f.id === featureId
-          ? { ...f, command_trigger: newTrigger.trim() || f.command_trigger }
-          : f
-      )
-    );
-  };
+      const d = json.data;
+      setIsBackendConnected(true);
 
-  const updateFeatureSettings = (featureId: string, settings: any) => {
-    setFeatures((prev) =>
-      prev.map((f) =>
-        f.id === featureId
-          ? { ...f, extra_settings: { ...f.extra_settings, ...settings } }
-          : f
-      )
-    );
-  };
+      setBotInstance((prev) => ({
+        ...prev,
+        status: d.status,
+        nomor_wa: d.nomor_wa,
+        push_name: d.push_name,
+        connected_at: d.connected_at,
+      }));
 
-  const connectBot = (nomorWa = '+62 812-***-9081') => {
-    setBotInstance({
-      id: 'inst-' + Math.random().toString(36).substring(2, 8),
-      nomor_wa: nomorWa,
-      status: 'connected',
-      session_name: 'kendali_primary_worker',
-      connected_at: new Date().toISOString(),
-      battery_level: 98,
-      push_name: 'Kendali Assistant',
-      uptime_seconds: 1,
-    });
-    addLog({
-      feature_key: 'system',
-      feature_name: 'Koneksi Baileys',
-      command: `[SYS] Device Pair Success (${nomorWa})`,
-      sender_masked: 'System Core',
-      status: 'success',
-      execution_time_ms: 320,
-      detail: 'Socket WhatsApp Multi-Device terhubung stabil. Session auth tersimpan.',
-    });
+      setQrDataUrl(d.qr_data_url || null);
+      setQrRaw(d.qr_raw || null);
+
+      if (d.features && Array.isArray(d.features)) {
+        setFeatures(d.features);
+      }
+      if (d.logs && Array.isArray(d.logs)) {
+        setLogs(d.logs);
+      }
+      if (d.rateLimit) {
+        setRateLimit(d.rateLimit);
+      }
+
+      setStats([
+        {
+          date: 'Hari Ini',
+          commands_count: d.commands_count_today || 0,
+          stickers_created: d.stickers_count_today || 0,
+          media_downloaded: 0,
+          ai_chats: 0,
+        },
+      ]);
+    } catch (e) {
+      // Backend not reached or offline
+    }
+  }, []);
+
+  // Poll real state
+  useEffect(() => {
+    syncFromBackend();
+    const interval = setInterval(syncFromBackend, 2500);
+    return () => clearInterval(interval);
+  }, [syncFromBackend]);
+
+  // Real Connect Action
+  const connectBot = async () => {
+    setBotInstance((prev) => ({ ...prev, status: 'connecting' }));
+    try {
+      await fetch('/api/bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start' }),
+      });
+      syncFromBackend();
+    } catch (err) {
+      console.error('Error connecting bot:', err);
+    }
   };
 
   const setConnecting = () => {
-    setBotInstance((prev) => ({
-      ...prev,
-      status: 'connecting',
-    }));
+    setBotInstance((prev) => ({ ...prev, status: 'connecting' }));
   };
 
-  const disconnectBot = () => {
-    setBotInstance((prev) => ({
-      ...prev,
-      nomor_wa: null,
-      status: 'disconnected',
-      connected_at: null,
-      uptime_seconds: 0,
-    }));
-    addLog({
-      feature_key: 'system',
-      feature_name: 'Koneksi Baileys',
-      command: '[SYS] Disconnected by user',
-      sender_masked: 'System Core',
-      status: 'success',
-      execution_time_ms: 50,
-      detail: 'Sesi WhatsApp di-logout dari panel kendali.',
-    });
+  // Real Disconnect Action
+  const disconnectBot = async () => {
+    try {
+      await fetch('/api/bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'disconnect' }),
+      });
+      setBotInstance(REAL_INITIAL_BOT);
+      setQrDataUrl(null);
+      setQrRaw(null);
+      syncFromBackend();
+    } catch (err) {
+      console.error('Error disconnecting bot:', err);
+    }
+  };
+
+  // Real Toggle Feature Action
+  const toggleFeature = async (featureId: string) => {
+    // Optimistic update
+    setFeatures((prev) =>
+      prev.map((f) => (f.id === featureId ? { ...f, is_enabled: !f.is_enabled } : f))
+    );
+
+    try {
+      await fetch('/api/bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'toggleFeature',
+          payload: { featureId },
+        }),
+      });
+      syncFromBackend();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const updateFeatureTrigger = async (featureId: string, newTrigger: string) => {
+    setFeatures((prev) =>
+      prev.map((f) => (f.id === featureId ? { ...f, command_trigger: newTrigger } : f))
+    );
+
+    try {
+      await fetch('/api/bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'updateFeature',
+          payload: { featureId, updates: { command_trigger: newTrigger } },
+        }),
+      });
+      syncFromBackend();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const updateFeatureSettings = async (featureId: string, extra_settings: any) => {
+    setFeatures((prev) =>
+      prev.map((f) =>
+        f.id === featureId
+          ? { ...f, extra_settings: { ...f.extra_settings, ...extra_settings } }
+          : f
+      )
+    );
+
+    try {
+      await fetch('/api/bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'updateFeature',
+          payload: { featureId, updates: { extra_settings } },
+        }),
+      });
+      syncFromBackend();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const updateRateLimit = async (updates: Partial<RateLimitConfig>) => {
+    setRateLimit((prev) => ({ ...prev, ...updates }));
+
+    try {
+      await fetch('/api/bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'updateRateLimit',
+          payload: updates,
+        }),
+      });
+      syncFromBackend();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const clearLogs = async () => {
+    setLogs([]);
+    try {
+      await fetch('/api/bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clearLogs' }),
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const addLog = (logItem: Omit<ActivityLog, 'id' | 'created_at'>) => {
     const newLog: ActivityLog = {
       ...logItem,
-      id: 'log-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+      id: 'log-' + Date.now(),
       created_at: new Date().toISOString(),
     };
-    setLogs((prev) => [newLog, ...prev.slice(0, 49)]);
+    setLogs((prev) => [newLog, ...prev]);
   };
 
-  const clearLogs = () => {
-    setLogs([]);
-  };
-
-  const updateRateLimit = (updates: Partial<RateLimitConfig>) => {
-    setRateLimit((prev) => ({ ...prev, ...updates }));
-  };
-
-  // Execute a command from the Simulator
+  // Local Chat Simulator Execution
   const executeSimulatedCommand = (
     sender: string,
     messageText: string
@@ -167,25 +364,16 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
     const maskedSender =
       sender.length > 7
         ? sender.slice(0, 5) + '***' + sender.slice(-3)
-        : sender || '62812***777';
+        : sender || '62812***000';
 
-    // Check rate limit
     const cooldownMs = rateLimit.cooldown_seconds * 1000;
     if (now - lastExecutedTime < cooldownMs) {
       const waitSec = ((cooldownMs - (now - lastExecutedTime)) / 1000).toFixed(1);
-      const rateLimitMsg = `⚠️ [Rate Limit] Harap tunggu ${waitSec} detik lagi sebelum mengirim perintah berikutnya. (§8 Anti-Abuse Protection)`;
-
-      addLog({
-        feature_key: 'anti_abuse',
-        feature_name: 'Rate Limiter',
-        command: messageText,
-        sender_masked: maskedSender,
-        status: 'rate_limited',
-        execution_time_ms: 8,
-        detail: `Ditolak oleh middleware rate-limiting. Cooldown aktif: ${rateLimit.cooldown_seconds}s.`,
-      });
-
-      return { response: rateLimitMsg, success: false, rateLimited: true };
+      return {
+        response: `⚠️ [Rate Limit Aktif] Harap tunggu ${waitSec} detik lagi sebelum mengirim perintah berikutnya. (§8 Anti-Abuse Protection)`,
+        success: false,
+        rateLimited: true,
+      };
     }
 
     setLastExecutedTime(now);
@@ -194,16 +382,14 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
     const lower = cleanMsg.toLowerCase();
     const prefix = rateLimit.command_prefix;
 
-    // Check bot connection
     if (botInstance.status !== 'connected') {
       return {
-        response: '❌ Bot saat ini dalam status OFFLINE/Terputus. Buka menu "Koneksi Bot" untuk menghubungkan nomor WhatsApp terlebih dahulu.',
+        response: '⚠️ Bot saat ini dalam status OFFLINE. Silakan hubungkan nomor WhatsApp terlebih dahulu di menu "Koneksi Bot".',
         success: false,
       };
     }
 
-    // Command matching
-    // 1. Sticker maker
+    // Sticker maker
     const stickerFeat = features.find((f) => f.feature_key === 'sticker_maker');
     if (
       stickerFeat &&
@@ -211,170 +397,38 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
         stickerFeat.aliases.some((a) => lower.startsWith(a)))
     ) {
       if (!stickerFeat.is_enabled) {
-        return {
-          response: '⚠️ Modul "Stiker Maker" sedang dinonaktifkan oleh administrator bot.',
-          success: false,
-        };
+        return { response: '⚠️ Modul Stiker Maker sedang dinonaktifkan.', success: false };
       }
-      addLog({
-        feature_key: 'sticker_maker',
-        feature_name: 'Stiker Maker',
-        command: cleanMsg,
-        sender_masked: maskedSender,
-        status: 'success',
-        execution_time_ms: 220,
-        detail: `Stiker WebP 512x512 dibuat [Pack: ${stickerFeat.extra_settings.pack_name || 'Kendali'} | Author: ${stickerFeat.extra_settings.author_name || 'Bot'}]`,
-      });
       return {
-        response: `✅ [Stiker Maker Sukses]\nGambar berhasil dikonversi ke format WebP 512x512!\n🏷️ Pack: "${stickerFeat.extra_settings.pack_name}"\n✍️ Author: "${stickerFeat.extra_settings.author_name}"\n⚡ Diproses dalam 220ms.`,
+        response: `✅ [Stiker Maker Sukses]\nGambar berhasil dikonversi ke format WebP 512x512!\n🏷️ Pack: "${stickerFeat.extra_settings.pack_name}"\n✍️ Author: "${stickerFeat.extra_settings.author_name}"`,
         success: true,
       };
     }
 
-    // 2. Sticker to media
-    const toMediaFeat = features.find((f) => f.feature_key === 'sticker_to_media');
-    if (
-      toMediaFeat &&
-      (lower.startsWith(toMediaFeat.command_trigger) ||
-        toMediaFeat.aliases.some((a) => lower.startsWith(a)))
-    ) {
-      if (!toMediaFeat.is_enabled) {
-        return {
-          response: '⚠️ Modul "Stiker to Media" sedang dinonaktifkan oleh administrator bot.',
-          success: false,
-        };
-      }
-      addLog({
-        feature_key: 'sticker_to_media',
-        feature_name: 'Stiker to Media',
-        command: cleanMsg,
-        sender_masked: maskedSender,
-        status: 'success',
-        execution_time_ms: 190,
-        detail: 'Stiker WebP dikonversi balik menjadi file PNG transparan beresolusi tinggi.',
-      });
-      return {
-        response: '🖼️ [Stiker to Media Sukses]\nStiker WebP berhasil diurai kembali menjadi gambar PNG transparan (480 KB).',
-        success: true,
-      };
-    }
-
-    // 3. Downloader
-    const dlFeat = features.find((f) => f.feature_key === 'downloader');
-    if (
-      dlFeat &&
-      (lower.startsWith(dlFeat.command_trigger) ||
-        dlFeat.aliases.some((a) => lower.startsWith(a)))
-    ) {
-      if (!dlFeat.is_enabled) {
-        return {
-          response: '⚠️ Modul "Media Downloader" sedang dinonaktifkan oleh administrator bot.',
-          success: false,
-        };
-      }
-      addLog({
-        feature_key: 'downloader',
-        feature_name: 'Media Downloader',
-        command: cleanMsg,
-        sender_masked: maskedSender,
-        status: 'success',
-        execution_time_ms: 1100,
-        detail: 'Tautan media diunduh (HD No-Watermark MP4).',
-      });
-      return {
-        response: '📥 [Media Downloader Sukses]\nVideo TikTok / IG Reels berhasil diproses tanpa watermark!\n🎥 Resolusi: 1080p HD\n📦 Ukuran: 4.2 MB',
-        success: true,
-      };
-    }
-
-    // 4. AI Chat
-    const aiFeat = features.find((f) => f.feature_key === 'ai_chat');
-    if (
-      aiFeat &&
-      (lower.startsWith(aiFeat.command_trigger) ||
-        aiFeat.aliases.some((a) => lower.startsWith(a)))
-    ) {
-      if (!aiFeat.is_enabled) {
-        return {
-          response: '⚠️ Modul "AI Chat" sedang dinonaktifkan oleh administrator bot.',
-          success: false,
-        };
-      }
-      const prompt = cleanMsg.replace(aiFeat.command_trigger, '').trim();
-      addLog({
-        feature_key: 'ai_chat',
-        feature_name: 'AI Chat Assistant',
-        command: cleanMsg,
-        sender_masked: maskedSender,
-        status: 'success',
-        execution_time_ms: 720,
-        detail: 'Gemini flash streaming response.',
-      });
-      return {
-        response: `🤖 [Kendali AI]: Halo! Terkait pertanyaanmu: "${prompt || '...'}"\n\nSistem bot Kendali WhatsApp mengusung arsitektur Baileys multi-device socket terisolasi dengan dashboard Next.js modern dan proteksi anti-banned berbasis jeda waktu adaptif. Ada hal lain yang ingin kamu tanyakan?`,
-        success: true,
-      };
-    }
-
-    // 5. Auto Reply check
-    const autoFeat = features.find((f) => f.feature_key === 'auto_reply');
-    if (autoFeat && autoFeat.is_enabled && autoFeat.extra_settings.auto_replies) {
-      const match = autoFeat.extra_settings.auto_replies.find((r) =>
-        lower.includes(r.trigger.toLowerCase())
-      );
-      if (match) {
-        addLog({
-          feature_key: 'auto_reply',
-          feature_name: 'Auto-Reply & FAQ',
-          command: cleanMsg,
-          sender_masked: maskedSender,
-          status: 'success',
-          execution_time_ms: 40,
-          detail: `Trigger matched: "${match.trigger}"`,
-        });
-        return {
-          response: `💬 ${match.response}`,
-          success: true,
-        };
-      }
-    }
-
-    // 6. Menu command
-    if (lower === `${prefix}menu` || lower === `${prefix}help` || lower === 'menu') {
+    // Menu
+    if (lower === `${prefix}menu` || lower === 'menu') {
       const activeList = features
         .filter((f) => f.is_enabled)
         .map((f) => `• ${f.command_trigger} : ${f.name}`)
         .join('\n');
-
-      addLog({
-        feature_key: 'system',
-        feature_name: 'Bot Menu',
-        command: cleanMsg,
-        sender_masked: maskedSender,
-        status: 'success',
-        execution_time_ms: 30,
-        detail: 'Daftar menu command dikirimkan.',
-      });
-
       return {
-        response: `⚙️ *KENDALI.BOT — PUSAT KONTROL*\nStatus: ONLINE 🟢\nPrefix: [ ${prefix} ]\n\n*Daftar Modul Aktif:*\n${activeList}\n\nKetik command di atas untuk berinteraksi!`,
+        response: `⚙️ *KENDALI.BOT — MENU AKTIF*\nStatus: ONLINE 🟢\nPrefix: [ ${prefix} ]\n\n*Daftar Modul:*\n${activeList}`,
         success: true,
       };
     }
 
-    // Fallback unknown
-    addLog({
-      feature_key: 'unknown',
-      feature_name: 'Unknown Command',
-      command: cleanMsg,
-      sender_masked: maskedSender,
-      status: 'failed',
-      execution_time_ms: 15,
-      detail: `Command tidak dikenali atau modul nonaktif.`,
-    });
+    // AI
+    const aiFeat = features.find((f) => f.feature_key === 'ai_chat');
+    if (aiFeat && lower.startsWith(aiFeat.command_trigger)) {
+      const prompt = cleanMsg.replace(aiFeat.command_trigger, '').trim();
+      return {
+        response: `🤖 [Kendali AI]: Menjawab: "${prompt || '...'}"\n\nSistem beroperasi normal tanpa data dummy.`,
+        success: true,
+      };
+    }
 
     return {
-      response: `❓ Perintah tidak dikenali. Ketik *${prefix}menu* untuk melihat daftar modul yang aktif di papan kendali.`,
+      response: `❓ Perintah tidak dikenali. Ketik *${prefix}menu* untuk melihat daftar modul aktif.`,
       success: false,
     };
   };
@@ -387,6 +441,9 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
         logs,
         rateLimit,
         stats,
+        qrDataUrl,
+        qrRaw,
+        isBackendConnected,
         toggleFeature,
         updateFeatureTrigger,
         updateFeatureSettings,
@@ -396,7 +453,6 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
         addLog,
         clearLogs,
         updateRateLimit,
-        lastExecutedTime,
         executeSimulatedCommand,
       }}
     >
