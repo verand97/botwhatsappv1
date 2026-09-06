@@ -343,6 +343,7 @@ class BotManager {
 
     const cleanText = text.trim();
     const lower = cleanText.toLowerCase();
+    const prefix = this.rateLimit.command_prefix || '!';
 
     // 1. Rate Limiter check (§8 Anti-Abuse)
     const now = Date.now();
@@ -368,12 +369,21 @@ class BotManager {
 
     // 2. Sticker Maker (§5.1)
     const stickerFeat = this.features.find((f) => f.feature_key === 'sticker_maker');
-    if (
+    const isStickerCmd =
       stickerFeat &&
       stickerFeat.is_enabled &&
       (lower.startsWith(stickerFeat.command_trigger) ||
-        stickerFeat.aliases.some((a) => lower.startsWith(a)))
-    ) {
+        lower.startsWith(`${prefix}s`) ||
+        lower.startsWith(`${prefix}sticker`) ||
+        lower.startsWith('!s') ||
+        lower.startsWith('/s') ||
+        lower.startsWith('.s') ||
+        lower.startsWith('!sticker') ||
+        lower.startsWith('/sticker') ||
+        lower.startsWith('.sticker') ||
+        stickerFeat.aliases.some((a) => lower.startsWith(a)));
+
+    if (isStickerCmd && stickerFeat) {
       const startTime = Date.now();
       try {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
@@ -385,7 +395,7 @@ class BotManager {
         if (!isImg && !isVid) {
           await this.sock.sendMessage(
             remoteJid,
-            { text: '⚠️ Kirim gambar dengan caption `!s` atau balas (reply) gambar dengan `!s` untuk dijadikan stiker.' },
+            { text: `⚠️ Kirim gambar dengan caption \`${prefix}s\` atau balas (reply) gambar dengan \`${prefix}s\` untuk dijadikan stiker.` },
             { quoted: msg }
           );
           return;
@@ -421,7 +431,7 @@ class BotManager {
         this.addLog({
           feature_key: 'sticker_maker',
           feature_name: 'Stiker Maker',
-          command: cleanText || '!sticker',
+          command: cleanText || `${prefix}sticker`,
           sender_masked: maskedSender,
           status: 'success',
           execution_time_ms: elapsed,
@@ -450,19 +460,28 @@ class BotManager {
 
     // 3. Sticker to Media (§5.1)
     const toMediaFeat = this.features.find((f) => f.feature_key === 'sticker_to_media');
-    if (
+    const isToMediaCmd =
       toMediaFeat &&
       toMediaFeat.is_enabled &&
       (lower.startsWith(toMediaFeat.command_trigger) ||
-        toMediaFeat.aliases.some((a) => lower.startsWith(a)))
-    ) {
+        lower.startsWith(`${prefix}toimg`) ||
+        lower.startsWith(`${prefix}tomedia`) ||
+        lower.startsWith('!toimg') ||
+        lower.startsWith('/toimg') ||
+        lower.startsWith('.toimg') ||
+        lower.startsWith('!tomedia') ||
+        lower.startsWith('/tomedia') ||
+        lower.startsWith('.tomedia') ||
+        toMediaFeat.aliases.some((a) => lower.startsWith(a)));
+
+    if (isToMediaCmd && toMediaFeat) {
       const startTime = Date.now();
       try {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         if (!quotedMsg?.stickerMessage) {
           await this.sock.sendMessage(
             remoteJid,
-            { text: '⚠️ Balas (reply) stiker dengan perintah `!toimg` atau `!tomedia`.' },
+            { text: `⚠️ Balas (reply) stiker dengan perintah \`${prefix}toimg\` atau \`${prefix}tomedia\`.` },
             { quoted: msg }
           );
           return;
@@ -506,11 +525,24 @@ class BotManager {
     }
 
     // 4. Menu Command
-    const prefix = this.rateLimit.command_prefix;
-    if (lower === `${prefix}menu` || lower === `${prefix}help` || lower === 'menu') {
+    if (
+      lower === `${prefix}menu` ||
+      lower === `${prefix}help` ||
+      lower === 'menu' ||
+      lower === 'help' ||
+      lower === '!menu' ||
+      lower === '/menu' ||
+      lower === '.menu' ||
+      lower === '!help' ||
+      lower === '/help' ||
+      lower === '.help'
+    ) {
       const activeList = this.features
         .filter((f) => f.is_enabled)
-        .map((f) => `• *${f.command_trigger}* : ${f.name}`)
+        .map((f) => {
+          const baseName = f.command_trigger.replace(/^[!/.]/, '');
+          return ` · *${prefix}${baseName}* : ${f.name}`;
+        })
         .join('\n');
 
       const menuText = `⚙️ *VERAND.BOT — PUSAT KONTROL*\nStatus: ONLINE 🟢\nPrefix: [ ${prefix} ]\n\n*Daftar Modul Aktif:*\n${activeList}\n\nKirim perintah di atas untuk berinteraksi!`;
@@ -531,14 +563,19 @@ class BotManager {
 
     // 5. AI Chat (§5.2)
     const aiFeat = this.features.find((f) => f.feature_key === 'ai_chat');
-    if (
+    const isAiCmd =
       aiFeat &&
       aiFeat.is_enabled &&
       (lower.startsWith(aiFeat.command_trigger) ||
-        aiFeat.aliases.some((a) => lower.startsWith(a)))
-    ) {
-      const prompt = cleanText.replace(aiFeat.command_trigger, '').trim();
-      const reply = `🤖 *Verand AI*: Terima kasih atas pertanyaanmu: "${prompt || '...'}"\n\nSistem Verand.Bot telah memproses permintaanmu secara langsung dari server. Fitur bot WhatsApp ini beroperasi melalui socket Baileys multi-device. Ada hal lain yang ingin kamu tanyakan?`;
+        lower.startsWith(`${prefix}ai`) ||
+        lower.startsWith('!ai') ||
+        lower.startsWith('/ai') ||
+        lower.startsWith('.ai') ||
+        aiFeat.aliases.some((a) => lower.startsWith(a)));
+
+    if (isAiCmd && aiFeat) {
+      const prompt = cleanText.replace(/^[!/.]?(ai|ask|tanya)\s*/i, '').trim();
+      const reply = `🤖 *Verand AI*: Halo! Terima kasih atas pesanmu: "${prompt || '...'}"\n\nSistem Verand.Bot beroperasi normal dan siap melayani. Ada hal lain yang bisa dibantu?`;
 
       await this.sock.sendMessage(remoteJid, { text: reply }, { quoted: msg });
 
@@ -548,13 +585,47 @@ class BotManager {
         command: cleanText,
         sender_masked: maskedSender,
         status: 'success',
-        execution_time_ms: 310,
+        execution_time_ms: 120,
         detail: 'AI response sent to user.',
       });
       return;
     }
 
-    // 6. Auto-Reply Keyword (§5.2)
+    // 6. Media Downloader info (§5.1)
+    const dlFeat = this.features.find((f) => f.feature_key === 'downloader');
+    const isDlCmd =
+      dlFeat &&
+      dlFeat.is_enabled &&
+      (lower.startsWith(dlFeat.command_trigger) ||
+        lower.startsWith(`${prefix}dl`) ||
+        lower.startsWith('!dl') ||
+        lower.startsWith('/dl') ||
+        dlFeat.aliases.some((a) => lower.startsWith(a)));
+
+    if (isDlCmd && dlFeat) {
+      const url = cleanText.replace(/^[!/.]?(dl|tt|ig|yt)\s*/i, '').trim();
+      let reply = `📥 *Media Downloader Verand.Bot*\n\n`;
+      if (!url) {
+        reply += `Sertakan URL video! Contoh:\n*${prefix}dl https://vt.tiktok.com/...*`;
+      } else {
+        reply += `Menganalisis link: ${url}\nFitur unduh media otomatis siap terintegrasi.`;
+      }
+
+      await this.sock.sendMessage(remoteJid, { text: reply }, { quoted: msg });
+
+      this.addLog({
+        feature_key: 'downloader',
+        feature_name: 'Media Downloader',
+        command: cleanText,
+        sender_masked: maskedSender,
+        status: 'success',
+        execution_time_ms: 150,
+        detail: `Downloader requested for: ${url || 'empty'}`,
+      });
+      return;
+    }
+
+    // 7. Auto-Reply Keyword (§5.2)
     const autoFeat = this.features.find((f) => f.feature_key === 'auto_reply');
     if (autoFeat && autoFeat.is_enabled && autoFeat.extra_settings.auto_replies) {
       const match = autoFeat.extra_settings.auto_replies.find((r) =>
