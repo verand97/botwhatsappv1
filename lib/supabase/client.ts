@@ -19,16 +19,21 @@ export function getSupabaseConfig(): SupabaseConfig {
 }
 
 // Helper stub for synchronizing session data securely
-export async function syncBotSessionToCloud(_instanceId: string, _payload: Record<string, unknown>) {
+export async function syncBotSessionToCloud(instanceId: string, payload: Record<string, unknown>) {
   const config = getSupabaseConfig();
   if (!config.isConfigured) {
     // Running in local standalone/demonstration mode
-    return { success: true, mode: 'local-store' };
+    return {
+      success: true,
+      mode: 'local-store',
+      instanceId,
+      payloadSize: Object.keys(payload).length,
+    };
   }
 
   // When configured, persist to Supabase tables bot_instances, feature_configs, activity_logs
   try {
-    return { success: true, mode: 'cloud-synced' };
+    return { success: true, mode: 'cloud-synced', instanceId };
   } catch (err) {
     console.error('Supabase sync error:', err);
     return { success: false, error: err };

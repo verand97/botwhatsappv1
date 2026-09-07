@@ -289,6 +289,7 @@ class BotManager {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
+          this.isConnecting = false;
           this.qrRaw = qr;
           try {
             this.qrDataUrl = await QRCode.toDataURL(qr, { margin: 1, scale: 8 });
@@ -334,6 +335,19 @@ class BotManager {
           this.status = 'disconnected';
           this.nomorWa = null;
           this.connectedAt = null;
+          this.qrRaw = null;
+          this.qrDataUrl = null;
+
+          if (isLoggedOut) {
+            try {
+              if (fs.existsSync(this.authDir)) {
+                fs.rmSync(this.authDir, { recursive: true, force: true });
+                fs.mkdirSync(this.authDir, { recursive: true });
+              }
+            } catch (clearErr) {
+              console.error('Failed to clear expired auth session:', clearErr);
+            }
+          }
 
           this.addLog({
             feature_key: 'system',
@@ -343,7 +357,7 @@ class BotManager {
             status: 'failed',
             execution_time_ms: 20,
             detail: isLoggedOut
-              ? 'Sesi WhatsApp di-logout dari perangkat.'
+              ? 'Sesi WhatsApp di-logout dari perangkat. Sesi lama telah dibersihkan agar dapat scan QR baru.'
               : 'Socket terputus, mencoba rekoneksi otomatis...',
           });
 
@@ -858,6 +872,7 @@ class BotManager {
       }
       this.sock = null;
     }
+    this.isConnecting = false;
     this.status = 'disconnected';
     this.nomorWa = null;
     this.pushName = null;
