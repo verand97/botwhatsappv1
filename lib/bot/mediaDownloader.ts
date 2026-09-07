@@ -313,7 +313,7 @@ async function extractYouTube(url: string, isAudioOnly: boolean = false): Promis
  */
 async function extractFacebook(url: string): Promise<MediaDownloadResult> {
   let videoUrl = '';
-  let title = 'Facebook Video';
+  const title = 'Facebook Video';
 
   // Provider 1: ruhend-scraper.fbdl
   try {
@@ -431,7 +431,7 @@ async function extractInstagram(url: string): Promise<MediaDownloadResult> {
   try {
     const res = await btch.igdl(url);
     if (res && res.status && Array.isArray(res.result) && res.result.length > 0) {
-      const first = res.result.find((item: any) => item?.url && item.url.startsWith('http'));
+      const first = res.result.find((item: { url?: string }) => item?.url && item.url.startsWith('http'));
       if (first) {
         const isVideo = first.url.includes('.mp4');
         const buffer = await downloadMediaBuffer(first.url, 45 * 1024 * 1024);

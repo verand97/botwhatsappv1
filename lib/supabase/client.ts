@@ -19,7 +19,7 @@ export function getSupabaseConfig(): SupabaseConfig {
 }
 
 // Helper stub for synchronizing session data securely
-export async function syncBotSessionToCloud(instanceId: string, payload: any) {
+export async function syncBotSessionToCloud(_instanceId: string, _payload: Record<string, unknown>) {
   const config = getSupabaseConfig();
   if (!config.isConfigured) {
     // Running in local standalone/demonstration mode

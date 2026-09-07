@@ -5,7 +5,7 @@
 
 import makeWASocket, {
   DisconnectReason,
-  useMultiFileAuthState,
+  useMultiFileAuthState as initMultiFileAuthState,
   WASocket,
   proto,
 } from '@whiskeysockets/baileys';
@@ -15,7 +15,7 @@ import { handleDownloader } from './handlers/downloader';
 import { checkRateLimit } from './middleware/rateLimiter';
 
 export async function startWhatsAppWorker() {
-  const { state, saveCreds } = await useMultiFileAuthState('baileys_auth_info');
+  const { state, saveCreds } = await initMultiFileAuthState('baileys_auth_info');
 
   const sock: WASocket = makeWASocket({
     auth: state,
@@ -26,7 +26,7 @@ export async function startWhatsAppWorker() {
   sock.ev.on('creds.update', saveCreds);
 
   // Monitor status koneksi real-time (§4.2)
-  sock.ev.on('connection.update', (update: any) => {
+  sock.ev.on('connection.update', (update: { connection?: string; lastDisconnect?: { error?: unknown }; qr?: string }) => {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
       console.log('[QR READY] Scan QR code via dashboard atau terminal:', qr);
@@ -45,7 +45,7 @@ export async function startWhatsAppWorker() {
   });
 
   // Handler pesan masuk
-  sock.ev.on('messages.upsert', async ({ messages, type }: { messages: any[]; type: string }) => {
+  sock.ev.on('messages.upsert', async ({ messages, type }: { messages: proto.IWebMessageInfo[]; type: string }) => {
     if (type !== 'notify') return;
 
     for (const msg of messages) {

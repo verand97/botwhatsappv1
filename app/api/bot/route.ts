@@ -19,9 +19,10 @@ export async function GET() {
         rateLimit,
       },
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err.message : 'Failed to fetch bot status';
     return NextResponse.json(
-      { success: false, error: err?.message || 'Failed to fetch bot status' },
+      { success: false, error },
       { status: 500 }
     );
   }
@@ -71,9 +72,10 @@ export async function POST(req: Request) {
           { status: 400 }
         );
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err.message : 'Server error';
     return NextResponse.json(
-      { success: false, error: err?.message || 'Server error' },
+      { success: false, error },
       { status: 500 }
     );
   }

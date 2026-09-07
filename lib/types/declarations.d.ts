@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 declare module 'node-webpmux' {
   export class Image {
     load(buffer: Buffer): Promise<void>;

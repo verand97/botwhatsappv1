@@ -1,8 +1,8 @@
 import makeWASocket, {
   DisconnectReason,
-  useMultiFileAuthState,
+  useMultiFileAuthState as initMultiFileAuthState,
   WASocket,
-  proto,
+  WAMessage,
   downloadMediaMessage,
 } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
@@ -274,7 +274,7 @@ class BotManager {
     this.qrDataUrl = null;
 
     try {
-      const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+      const { state, saveCreds } = await initMultiFileAuthState(this.authDir);
 
       this.sock = makeWASocket({
         auth: state,
@@ -285,7 +285,7 @@ class BotManager {
 
       this.sock.ev.on('creds.update', saveCreds);
 
-      this.sock.ev.on('connection.update', async (update: any) => {
+      this.sock.ev.on('connection.update', async (update: { connection?: string; lastDisconnect?: { error?: unknown }; qr?: string }) => {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
@@ -328,7 +328,7 @@ class BotManager {
 
         if (connection === 'close') {
           this.isConnecting = false;
-          const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
+          const statusCode = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
           const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
           this.status = 'disconnected';
@@ -354,7 +354,7 @@ class BotManager {
       });
 
       // Handle Real Incoming Messages
-      this.sock.ev.on('messages.upsert', async ({ messages, type }: { messages: any[]; type: string }) => {
+      this.sock.ev.on('messages.upsert', async ({ messages, type }: { messages: WAMessage[]; type: string }) => {
         if (type !== 'notify') return;
 
         for (const msg of messages) {
@@ -364,7 +364,7 @@ class BotManager {
       });
 
       return this.getStatus();
-    } catch (err: any) {
+    } catch (err) {
       this.isConnecting = false;
       this.status = 'error';
       console.error('Failed to start Baileys:', err);
@@ -373,7 +373,7 @@ class BotManager {
   }
 
   // Real WhatsApp message handler
-  private async handleIncomingMessage(msg: any) {
+  private async handleIncomingMessage(msg: WAMessage) {
     if (!this.sock || !msg || !msg.key) return;
 
     const remoteJid = msg.key.remoteJid;
@@ -454,7 +454,7 @@ class BotManager {
         }
 
         // Download media from WhatsApp
-        const mediaBuffer = await downloadMediaMessage(targetMsg as any, 'buffer', {});
+        const mediaBuffer = await downloadMediaMessage(targetMsg as WAMessage, 'buffer', {});
 
         // Process WebP 512x512 with Sharp
         const webpBuffer = await sharp(mediaBuffer)
@@ -490,7 +490,7 @@ class BotManager {
           detail: `Stiker WebP 512x512 [${packName} / ${authorName}] dikirim dalam ${elapsed}ms.`,
         });
         return;
-      } catch (err: any) {
+      } catch (err) {
         console.error('Sticker Maker Error:', err);
         await this.sock.sendMessage(
           remoteJid,
@@ -504,7 +504,7 @@ class BotManager {
           sender_masked: maskedSender,
           status: 'failed',
           execution_time_ms: Date.now() - startTime,
-          detail: err?.message || 'Error processing sticker',
+          detail: (err as Error)?.message || 'Error processing sticker',
         });
         return;
       }
@@ -540,7 +540,7 @@ class BotManager {
         }
 
         const stickerBuf = await downloadMediaMessage(
-          { message: quotedMsg, key: msg.key } as any,
+          { message: quotedMsg, key: msg.key } as WAMessage,
           'buffer',
           {}
         );
@@ -565,7 +565,7 @@ class BotManager {
           detail: `Stiker dikonversi ke PNG transparan dalam ${elapsed}ms.`,
         });
         return;
-      } catch (err: any) {
+      } catch (err) {
         console.error('Sticker to Media Error:', err);
         await this.sock.sendMessage(
           remoteJid,
@@ -688,7 +688,7 @@ class BotManager {
         await this.sock.sendMessage(remoteJid, {
           react: { text: '⏳', key: msg.key },
         });
-      } catch (_) {}
+      } catch {}
 
       try {
         const result = await downloadMediaFromUrl(targetUrl, { isAudioOnly });
@@ -698,7 +698,7 @@ class BotManager {
             await this.sock.sendMessage(remoteJid, {
               react: { text: '❌', key: msg.key },
             });
-          } catch (_) {}
+          } catch {}
 
           const failMsg = `❌ *Gagal Mengunduh Media*\n\n${result.error || 'Media tidak dapat diakses atau dibatasi.'}`;
           await this.sock.sendMessage(remoteJid, { text: failMsg }, { quoted: msg });
@@ -783,7 +783,7 @@ class BotManager {
           await this.sock.sendMessage(remoteJid, {
             react: { text: '✅', key: msg.key },
           });
-        } catch (_) {}
+        } catch {}
 
         this.mediaDownloadedToday++;
         this.commandsCountToday++;
@@ -796,18 +796,19 @@ class BotManager {
           execution_time_ms: Date.now() - startTime,
           detail: `Berhasil mengunduh ${result.platform} (${result.type})`,
         });
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : 'Gagal mengirim media.';
         console.error('[BOT DOWNLOADER ERROR]', err);
         try {
           await this.sock.sendMessage(remoteJid, {
             react: { text: '❌', key: msg.key },
           });
-        } catch (_) {}
+        } catch {}
 
         await this.sock.sendMessage(
           remoteJid,
           {
-            text: `❌ Terjadi kesalahan saat memproses unduhan: ${err?.message || 'Gagal mengirim media.'}`,
+            text: `❌ Terjadi kesalahan saat memproses unduhan: ${errorMsg}`,
           },
           { quoted: msg }
         );
@@ -819,7 +820,7 @@ class BotManager {
           sender_masked: maskedSender,
           status: 'failed',
           execution_time_ms: Date.now() - startTime,
-          detail: `Downloader exception: ${err?.message}`,
+          detail: `Downloader exception: ${errorMsg}`,
         });
       }
       return;
@@ -852,7 +853,7 @@ class BotManager {
     if (this.sock) {
       try {
         await this.sock.logout();
-      } catch (e) {
+      } catch {
         // ignore
       }
       this.sock = null;

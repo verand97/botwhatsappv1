@@ -132,7 +132,7 @@ interface BotContextType {
   // Actions
   toggleFeature: (featureId: string) => void;
   updateFeatureTrigger: (featureId: string, newTrigger: string) => void;
-  updateFeatureSettings: (featureId: string, settings: any) => void;
+  updateFeatureSettings: (featureId: string, settings: Partial<FeatureConfig['extra_settings']>) => void;
   connectBot: () => void;
   disconnectBot: () => void;
   setConnecting: () => void;
@@ -201,16 +201,21 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
           ai_chats: 0,
         },
       ]);
-    } catch (e) {
+    } catch {
       // Backend not reached or offline
     }
   }, []);
 
   // Poll real state
   useEffect(() => {
-    syncFromBackend();
+    const timer = setTimeout(() => {
+      void syncFromBackend();
+    }, 0);
     const interval = setInterval(syncFromBackend, 2500);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+    };
   }, [syncFromBackend]);
 
   // Real Connect Action
@@ -291,7 +296,10 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const updateFeatureSettings = async (featureId: string, extra_settings: any) => {
+  const updateFeatureSettings = async (
+    featureId: string,
+    extra_settings: Partial<FeatureConfig['extra_settings']>
+  ) => {
     setFeatures((prev) =>
       prev.map((f) =>
         f.id === featureId
@@ -357,15 +365,10 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
 
   // Local Chat Simulator Execution
   const executeSimulatedCommand = (
-    sender: string,
+    _sender: string,
     messageText: string
   ): { response: string; success: boolean; rateLimited?: boolean } => {
     const now = Date.now();
-    const maskedSender =
-      sender.length > 7
-        ? sender.slice(0, 5) + '***' + sender.slice(-3)
-        : sender || '62812***000';
-
     const cooldownMs = rateLimit.cooldown_seconds * 1000;
     if (now - lastExecutedTime < cooldownMs) {
       const waitSec = ((cooldownMs - (now - lastExecutedTime)) / 1000).toFixed(1);
