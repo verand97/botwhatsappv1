@@ -11,6 +11,7 @@ import path from 'path';
 import fs from 'fs';
 import pino from 'pino';
 import { addExifToWebp } from './exif';
+import { downloadMediaFromUrl } from './mediaDownloader';
 import { ActivityLog, FeatureConfig, RateLimitConfig, BotConnectionStatus } from '../types';
 
 // Default initial features
@@ -48,13 +49,13 @@ const DEFAULT_FEATURES: FeatureConfig[] = [
     id: 'feat-downloader',
     feature_key: 'downloader',
     name: 'Media Downloader',
-    tagline: 'Unduh video atau audio dari tautan TikTok, Instagram Reels, dan YouTube',
+    tagline: 'Unduh video atau audio dari tautan TikTok, Instagram Reels, YouTube, Facebook, dan Twitter/X',
     category: 'media',
     is_enabled: true,
     command_trigger: '!dl',
-    aliases: ['!tt', '!ig', '!yt'],
+    aliases: ['!tt', '!ig', '!yt', '!ytmp3', '!fb', '!tiktok', '!youtube', '!instagram', '!twitter'],
     extra_settings: {
-      supported_platforms: ['TikTok', 'Instagram', 'YouTube'],
+      supported_platforms: ['TikTok', 'Instagram', 'YouTube', 'Facebook', 'Twitter/X'],
     },
   },
   {
@@ -127,6 +128,7 @@ class BotManager {
   private userLastCommandMap = new Map<string, number>();
   private commandsCountToday = 0;
   private stickersCountToday = 0;
+  private mediaDownloadedToday = 0;
   private isConnecting = false;
   private authDir: string;
   private configFile: string;
@@ -195,6 +197,7 @@ class BotManager {
       total_features_count: this.features.length,
       commands_count_today: this.commandsCountToday,
       stickers_count_today: this.stickersCountToday,
+      media_downloaded_today: this.mediaDownloadedToday,
     };
   }
 
@@ -640,7 +643,7 @@ class BotManager {
       return;
     }
 
-    // 6. Media Downloader info (§5.1)
+    // 6. Media Downloader (§5.1)
     const dlFeat = this.features.find((f) => f.feature_key === 'downloader');
     const isDlCmd =
       dlFeat &&
@@ -652,25 +655,173 @@ class BotManager {
         dlFeat.aliases.some((a) => lower.startsWith(a)));
 
     if (isDlCmd && dlFeat) {
-      const url = cleanText.replace(/^[!/.]?(dl|tt|ig|yt)\s*/i, '').trim();
-      let reply = `📥 *Media Downloader Verand.Bot*\n\n`;
-      if (!url) {
-        reply += `Sertakan URL video! Contoh:\n*${prefix}dl https://vt.tiktok.com/...*`;
-      } else {
-        reply += `Menganalisis link: ${url}\nFitur unduh media otomatis siap terintegrasi.`;
+      const urlMatch = cleanText.match(/https?:\/\/[^\s]+/i);
+      if (!urlMatch) {
+        const helpText =
+          `📥 *Media Downloader Verand.Bot*\n\n` +
+          `Sertakan link media yang ingin diunduh!\n` +
+          `*Contoh:* ${prefix}dl https://vt.tiktok.com/xxxxxx/\n\n` +
+          `*Perintah Cepat:*\n` +
+          `• *!tt <url>* : Unduh video/audio TikTok tanpa watermark\n` +
+          `• *!yt <url>* : Unduh video YouTube (MP4)\n` +
+          `• *!ytmp3 <url>* : Unduh audio YouTube (MP3)\n` +
+          `• *!fb <url>* : Unduh video Facebook HD/SD\n` +
+          `• *!ig <url>* : Unduh video Reels / Foto Instagram\n` +
+          `• *!twitter <url>* : Unduh video Twitter/X\n\n` +
+          `_Didukung: TikTok, YouTube, Instagram, Facebook, Twitter/X_`;
+
+        await this.sock.sendMessage(remoteJid, { text: helpText }, { quoted: msg });
+        return;
       }
 
-      await this.sock.sendMessage(remoteJid, { text: reply }, { quoted: msg });
+      const targetUrl = urlMatch[0];
+      const isAudioOnly =
+        lower.includes('ytmp3') ||
+        lower.includes('--audio') ||
+        lower.includes('-a') ||
+        lower.includes('mp3');
 
-      this.addLog({
-        feature_key: 'downloader',
-        feature_name: 'Media Downloader',
-        command: cleanText,
-        sender_masked: maskedSender,
-        status: 'success',
-        execution_time_ms: 150,
-        detail: `Downloader requested for: ${url || 'empty'}`,
-      });
+      const startTime = Date.now();
+
+      // Send wait reaction
+      try {
+        await this.sock.sendMessage(remoteJid, {
+          react: { text: '⏳', key: msg.key },
+        });
+      } catch (_) {}
+
+      try {
+        const result = await downloadMediaFromUrl(targetUrl, { isAudioOnly });
+
+        if (!result.success) {
+          try {
+            await this.sock.sendMessage(remoteJid, {
+              react: { text: '❌', key: msg.key },
+            });
+          } catch (_) {}
+
+          const failMsg = `❌ *Gagal Mengunduh Media*\n\n${result.error || 'Media tidak dapat diakses atau dibatasi.'}`;
+          await this.sock.sendMessage(remoteJid, { text: failMsg }, { quoted: msg });
+
+          this.addLog({
+            feature_key: 'downloader',
+            feature_name: 'Media Downloader',
+            command: cleanText,
+            sender_masked: maskedSender,
+            status: 'failed',
+            execution_time_ms: Date.now() - startTime,
+            detail: `Downloader failed: ${result.error}`,
+          });
+          return;
+        }
+
+        // Send media according to media type
+        if (result.type === 'video') {
+          if (result.buffer) {
+            await this.sock.sendMessage(
+              remoteJid,
+              {
+                video: result.buffer,
+                mimetype: 'video/mp4',
+                caption: result.caption,
+              },
+              { quoted: msg }
+            );
+          } else if (result.mediaUrl) {
+            await this.sock.sendMessage(
+              remoteJid,
+              {
+                video: { url: result.mediaUrl },
+                mimetype: 'video/mp4',
+                caption: result.caption,
+              },
+              { quoted: msg }
+            );
+          }
+        } else if (result.type === 'audio') {
+          if (result.buffer) {
+            await this.sock.sendMessage(
+              remoteJid,
+              {
+                audio: result.buffer,
+                mimetype: 'audio/mp4',
+                ptt: false,
+              },
+              { quoted: msg }
+            );
+          } else if (result.mediaUrl) {
+            await this.sock.sendMessage(
+              remoteJid,
+              {
+                audio: { url: result.mediaUrl },
+                mimetype: 'audio/mp4',
+                ptt: false,
+              },
+              { quoted: msg }
+            );
+          }
+        } else if (result.type === 'images' && result.images && result.images.length > 0) {
+          const maxImgs = Math.min(result.images.length, 10);
+          for (let i = 0; i < maxImgs; i++) {
+            const isFirst = i === 0;
+            await this.sock.sendMessage(
+              remoteJid,
+              {
+                image: { url: result.images[i] },
+                caption: isFirst ? result.caption : undefined,
+              },
+              { quoted: isFirst ? msg : undefined }
+            );
+            if (i < maxImgs - 1) {
+              await new Promise((r) => setTimeout(r, 600));
+            }
+          }
+        }
+
+        // Success reaction
+        try {
+          await this.sock.sendMessage(remoteJid, {
+            react: { text: '✅', key: msg.key },
+          });
+        } catch (_) {}
+
+        this.mediaDownloadedToday++;
+        this.commandsCountToday++;
+        this.addLog({
+          feature_key: 'downloader',
+          feature_name: 'Media Downloader',
+          command: cleanText,
+          sender_masked: maskedSender,
+          status: 'success',
+          execution_time_ms: Date.now() - startTime,
+          detail: `Berhasil mengunduh ${result.platform} (${result.type})`,
+        });
+      } catch (err: any) {
+        console.error('[BOT DOWNLOADER ERROR]', err);
+        try {
+          await this.sock.sendMessage(remoteJid, {
+            react: { text: '❌', key: msg.key },
+          });
+        } catch (_) {}
+
+        await this.sock.sendMessage(
+          remoteJid,
+          {
+            text: `❌ Terjadi kesalahan saat memproses unduhan: ${err?.message || 'Gagal mengirim media.'}`,
+          },
+          { quoted: msg }
+        );
+
+        this.addLog({
+          feature_key: 'downloader',
+          feature_name: 'Media Downloader',
+          command: cleanText,
+          sender_masked: maskedSender,
+          status: 'failed',
+          execution_time_ms: Date.now() - startTime,
+          detail: `Downloader exception: ${err?.message}`,
+        });
+      }
       return;
     }
 

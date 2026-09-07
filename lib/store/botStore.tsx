@@ -55,13 +55,13 @@ const DEFAULT_REAL_FEATURES: FeatureConfig[] = [
     id: 'feat-downloader',
     feature_key: 'downloader',
     name: 'Media Downloader',
-    tagline: 'Unduh video atau audio dari tautan TikTok, Instagram Reels, dan YouTube',
+    tagline: 'Unduh video atau audio dari tautan TikTok, Instagram Reels, YouTube, Facebook, dan Twitter/X',
     category: 'media',
     is_enabled: true,
     command_trigger: '!dl',
-    aliases: ['!tt', '!ig', '!yt'],
+    aliases: ['!tt', '!ig', '!yt', '!ytmp3', '!fb', '!tiktok', '!youtube', '!instagram', '!twitter'],
     extra_settings: {
-      supported_platforms: ['TikTok', 'Instagram', 'YouTube'],
+      supported_platforms: ['TikTok', 'Instagram', 'YouTube', 'Facebook', 'Twitter/X'],
     },
   },
   {
@@ -197,7 +197,7 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
           date: 'Hari Ini',
           commands_count: d.commands_count_today || 0,
           stickers_created: d.stickers_count_today || 0,
-          media_downloaded: 0,
+          media_downloaded: d.media_downloaded_today || 0,
           ai_chats: 0,
         },
       ]);
@@ -423,6 +423,48 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
       const prompt = cleanMsg.replace(aiFeat.command_trigger, '').trim();
       return {
         response: `🤖 [Verand AI]: Menjawab: "${prompt || '...'}"\n\nSistem beroperasi normal tanpa data dummy.`,
+        success: true,
+      };
+    }
+
+    // Downloader
+    const dlFeat = features.find((f) => f.feature_key === 'downloader');
+    if (
+      dlFeat &&
+      (lower.startsWith(dlFeat.command_trigger) ||
+        lower.startsWith(`${prefix}dl`) ||
+        lower.startsWith('!dl') ||
+        lower.startsWith('/dl') ||
+        dlFeat.aliases.some((a) => lower.startsWith(a)))
+    ) {
+      if (!dlFeat.is_enabled) {
+        return { response: '⚠️ Modul Media Downloader sedang dinonaktifkan.', success: false };
+      }
+      const urlMatch = cleanMsg.match(/https?:\/\/[^\s]+/i);
+      if (!urlMatch) {
+        return {
+          response:
+            `📥 *Media Downloader — Verand.Bot*\n\n` +
+            `Sertakan link media!\nContoh: *${prefix}dl https://vt.tiktok.com/ZSjXbxxxx/*\n\n` +
+            `*Format didukung:* TikTok (No-WM), YouTube (MP4/MP3), Facebook (HD), Instagram, Twitter/X.`,
+          success: false,
+        };
+      }
+      const url = urlMatch[0];
+      const isAudio = lower.includes('ytmp3') || lower.includes('audio') || lower.includes('mp3');
+      let platform = 'Media';
+      if (url.includes('tiktok.com')) platform = 'TikTok (No-Watermark)';
+      else if (url.includes('youtu')) platform = isAudio ? 'YouTube Audio (MP3)' : 'YouTube Video (MP4)';
+      else if (url.includes('instagram.com')) platform = 'Instagram Reels/Post';
+      else if (url.includes('facebook.com') || url.includes('fb.watch')) platform = 'Facebook HD Video';
+      else if (url.includes('twitter.com') || url.includes('x.com')) platform = 'Twitter/X Video';
+
+      return {
+        response:
+          `✅ [Simulasi Media Downloader Sukses]\n` +
+          `🎬 *Platform:* ${platform}\n` +
+          `🔗 *Tautan:* ${url}\n` +
+          `📦 *Status:* Berhasil diekstrak dan siap dikirim sebagai file ${isAudio ? 'Audio MP3' : 'Video MP4'} tanpa watermark.`,
         success: true,
       };
     }

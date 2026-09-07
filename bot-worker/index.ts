@@ -11,6 +11,7 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import { handleStickerMaker } from './handlers/stickerMaker';
+import { handleDownloader } from './handlers/downloader';
 import { checkRateLimit } from './middleware/rateLimiter';
 
 export async function startWhatsAppWorker() {
@@ -67,6 +68,17 @@ export async function startWhatsAppWorker() {
       // 2. Dispatch Handler Perintah
       if (text.startsWith('!s') || text.startsWith('!sticker')) {
         await handleStickerMaker(sock, msg);
+      } else if (
+        text.startsWith('!dl') ||
+        text.startsWith('!tt') ||
+        text.startsWith('!yt') ||
+        text.startsWith('!ig') ||
+        text.startsWith('!fb') ||
+        text.startsWith('!twitter') ||
+        text.startsWith('!ytmp3') ||
+        text.startsWith('/dl')
+      ) {
+        await handleDownloader(sock, msg);
       }
     }
   });

@@ -242,7 +242,7 @@ export default function ModuleCard({ feature }: ModuleCardProps) {
             {/* Downloader Supported Platforms info */}
             {feature.feature_key === 'downloader' && (
               <div className="p-2.5 rounded bg-panel-800 border border-panel-700 text-gray-300 text-[11px]">
-                💡 <span className="font-semibold text-white">Platform Didukung:</span> TikTok (No WM), Instagram Reels, YouTube Video/Audio. Bot otomatis mengompresi bila melebihi batas WhatsApp.
+                💡 <span className="font-semibold text-white">Platform Didukung:</span> TikTok (Video No-WM, Audio MP3, Slide Foto), YouTube (Video MP4 &amp; Audio MP3), Facebook (HD Video), Twitter/X, dan Instagram Reels/Post. Bot otomatis mengunduh dan mengirim media langsung ke chat WhatsApp.
               </div>
             )}
 

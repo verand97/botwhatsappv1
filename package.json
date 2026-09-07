@@ -9,9 +9,13 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@tobyg74/tiktok-api-dl": "^1.3.7",
     "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "api-dylux": "^1.8.6",
+    "btch-downloader": "^6.3.6",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
+    "instagram-url-direct": "^2.0.7",
     "jimp": "^1.6.1",
     "lucide-react": "^1.41.0",
     "next": "16.3.4",
@@ -20,7 +24,10 @@
     "qrcode": "^1.5.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "ruhend-scraper": "^10.0.3",
+    "sadaslk-dlcore": "^1.0.0",
     "sharp": "^0.35.4",
+    "snapsave-media-downloader": "^2.4.1",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {

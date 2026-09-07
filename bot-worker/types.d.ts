@@ -3,7 +3,7 @@ declare module '@whiskeysockets/baileys' {
     ev: {
       on: (event: string, callback: (data: any) => void) => void;
     };
-    sendMessage: (jid: string, content: any) => Promise<any>;
+    sendMessage: (jid: string, content: any, options?: any) => Promise<any>;
   }
 
   export namespace proto {
