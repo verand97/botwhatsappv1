@@ -20,6 +20,8 @@ export default function QrConnectPanel() {
   const [pairingMethod, setPairingMethod] = useState<'qr' | 'code'>('qr');
   const [phoneNumberInput, setPhoneNumberInput] = useState('6281234567890');
   const [pairingCodeGenerated, setPairingCodeGenerated] = useState<string | null>(null);
+  const [pairingLoading, setPairingLoading] = useState(false);
+  const [pairingNotice, setPairingNotice] = useState<string | null>(null);
   const [countdown, setCountdown] = useState(45);
 
   // Countdown timer for QR refresh
@@ -49,13 +51,38 @@ export default function QrConnectPanel() {
     }, 800);
   };
 
-  const handleGeneratePairingCode = (e: React.FormEvent) => {
+  const handleGeneratePairingCode = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanNum = phoneNumberInput.replace(/\D/g, '');
-    if (!cleanNum) return;
-    const code = Math.random().toString(36).substring(2, 6).toUpperCase() + '-' +
-                 Math.random().toString(36).substring(2, 6).toUpperCase();
-    setPairingCodeGenerated(code);
+    if (!cleanNum || cleanNum.length < 9) {
+      alert('Masukkan nomor WhatsApp yang valid lengkap dengan kode negara (contoh: 6281234567890)');
+      return;
+    }
+    setPairingLoading(true);
+    setPairingNotice(null);
+    setPairingCodeGenerated(null);
+
+    try {
+      const res = await fetch('/api/bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'getPairingCode', payload: { phoneNumber: cleanNum } }),
+      });
+      const data = await res.json();
+      if (data.success && data.data?.code) {
+        setPairingCodeGenerated(data.data.code);
+      } else {
+        setPairingNotice(
+          `Soket WhatsApp resmi memerlukan worker Baileys yang berjalan persisten. Jalankan perintah di terminal Anda:\nnode scripts/pair-whatsapp.js ${cleanNum}`
+        );
+      }
+    } catch {
+      setPairingNotice(
+        `Soket WhatsApp resmi memerlukan worker Baileys yang berjalan persisten. Jalankan perintah di terminal Anda:\nnode scripts/pair-whatsapp.js ${cleanNum}`
+      );
+    } finally {
+      setPairingLoading(false);
+    }
   };
 
   return (
@@ -268,12 +295,37 @@ export default function QrConnectPanel() {
 
                 <button
                   type="submit"
-                  className="w-full py-2.5 rounded-xl bg-circuit-500 hover:bg-circuit-400 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-2"
+                  disabled={pairingLoading}
+                  className="w-full py-2.5 rounded-xl bg-circuit-500 hover:bg-circuit-400 disabled:opacity-50 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-2"
                 >
                   <KeyRound className="w-4 h-4" />
-                  <span>Dapatkan 8-Digit Pairing Code</span>
+                  <span>{pairingLoading ? 'Menghubungkan ke WhatsApp...' : 'Dapatkan 8-Digit Pairing Code'}</span>
                 </button>
               </form>
+
+              {pairingNotice && (
+                <div className="mt-4 p-4 rounded-xl bg-panel-800 border border-module-amber/40 text-left w-full animate-fadeIn text-xs space-y-2">
+                  <div className="flex items-center gap-2 text-module-amber font-semibold">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>Perangkat Fisik Memerlukan Worker</span>
+                  </div>
+                  <p className="text-gray-300 text-[11px] leading-relaxed">
+                    WhatsApp mewajibkan soket WebSocket aktif saat memasukkan kode. Jalankan perintah ini di terminal laptop/server Anda:
+                  </p>
+                  <div className="p-2 rounded bg-panel-950 font-mono text-[11px] text-circuit-400 border border-panel-700 select-all">
+                    node scripts/pair-whatsapp.js {phoneNumberInput.replace(/\D/g, '') || '6281234567890'}
+                  </div>
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={handleSimulateSuccess}
+                      className="w-full py-2 rounded-lg bg-live-400/10 hover:bg-live-400/20 text-live-400 border border-live-400/30 font-medium text-xs transition-colors"
+                    >
+                      Uji Tampilan via Simulasi Cepat (1-Klik) &rarr;
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {pairingCodeGenerated && (
                 <div className="mt-6 p-4 rounded-xl bg-panel-800 border border-circuit-500/40 text-center w-full animate-fadeIn">

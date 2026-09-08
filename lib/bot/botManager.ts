@@ -274,6 +274,27 @@ class BotManager {
     dbInsertActivityLog(log).catch(() => {});
   }
 
+  // Request official WhatsApp 8-digit pairing code
+  public async getPairingCode(phoneNumber: string): Promise<string> {
+    const cleanPhone = phoneNumber.replace(/\D/g, '');
+    if (!cleanPhone || cleanPhone.length < 9) {
+      throw new Error('Nomor WhatsApp harus menyertakan kode negara (contoh: 6281234567890)');
+    }
+
+    if (!this.sock || this.status !== 'connecting') {
+      await this.startBot();
+    }
+
+    if (this.sock && !this.sock.authState?.creds?.registered) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const code = await this.sock.requestPairingCode(cleanPhone);
+      const formatted = code?.match(/.{1,4}/g)?.join('-') || code;
+      return formatted;
+    }
+
+    throw new Error('Perangkat sudah terhubung atau socket belum siap');
+  }
+
   // Start real Baileys connection
   public async startBot() {
     if (this.sock && this.status === 'connected') {

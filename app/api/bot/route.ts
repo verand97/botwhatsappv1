@@ -100,6 +100,17 @@ export async function POST(req: Request) {
         });
       }
 
+      case 'getPairingCode': {
+        const { phoneNumber } = payload || {};
+        try {
+          const code = await botManager.getPairingCode(phoneNumber);
+          return NextResponse.json({ success: true, data: { code } });
+        } catch (err: unknown) {
+          const errorMsg = err instanceof Error ? err.message : 'Gagal meminta pairing code';
+          return NextResponse.json({ success: false, error: errorMsg }, { status: 400 });
+        }
+      }
+
       case 'toggleFeature': {
         const { featureId } = payload;
         const features = botManager.toggleFeature(featureId);
