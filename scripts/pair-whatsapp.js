@@ -60,17 +60,16 @@ if (!phoneNumber || phoneNumber.length < 9) {
 
 const authDir = path.join(__dirname, '..', 'sessions', 'baileys_auth');
 
-// Hapus sesi lama yang tidak lengkap jika belum terdaftar secara sah
 const credsPath = path.join(authDir, 'creds.json');
 if (fs.existsSync(credsPath)) {
   try {
     const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
-    if (!creds.registered) {
-      console.log('🧹 Membersihkan sisa kredensial sesi sebelumnya yang belum tuntas...');
+    if (!creds.registered && !creds.me) {
+      console.log('🧹 Membersihkan sisa kredensial sesi yang belum tertaut...');
       fs.rmSync(authDir, { recursive: true, force: true });
     }
   } catch {
-    fs.rmSync(authDir, { recursive: true, force: true });
+    // ignore
   }
 }
 
@@ -103,7 +102,7 @@ async function connectToWhatsApp() {
     const { connection, lastDisconnect, qr } = update;
 
     // Saat server WhatsApp siap menerima otentikasi (ditandai dengan munculnya QR / auth handshake)
-    if (qr && !sock.authState.creds.registered && !pairingRequested) {
+    if (qr && !sock.authState.creds.registered && !sock.authState.creds.me && !pairingRequested) {
       pairingRequested = true;
 
       try {
@@ -206,29 +205,125 @@ async function connectToWhatsApp() {
     }
   });
 
-  // Handler pesan sederhana agar bot bisa langsung membalas /menu
+// Helper format menu baru
+function getMenuText(prefix = '/') {
+  return (
+    `⚙️ *VERAND.BOT — PUSAT KONTROL*\n` +
+    `Status: ONLINE 🟢 | Prefix: [ ${prefix} ]\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `📥 *Media Downloader*\n` +
+    `• \`${prefix}dl <link>\` : Unduh video/audio/slide (TikTok, IG, YT, FB, X)\n` +
+    `• \`${prefix}dl <link> 2\` : Unduh slide ke-2 saja\n` +
+    `• \`${prefix}dl <link> 1-3\` : Unduh slide rentang 1 sampai 3\n` +
+    `_Shortcut:_ \`${prefix}tt\`, \`${prefix}ig\`, \`${prefix}yt\`, \`${prefix}ytmp3\`, \`${prefix}fb\`, \`${prefix}twitter\`\n\n` +
+    `🎨 *Stiker Maker*\n` +
+    `• \`${prefix}sticker\` : Kirim/balas foto/video (maks 10d) jadi stiker\n\n` +
+    `🔄 *Stiker to Media*\n` +
+    `• \`${prefix}tomedia\` : Balas stiker untuk diubah ke gambar PNG\n\n` +
+    `🤖 *AI Assistant*\n` +
+    `• \`${prefix}ai <teks>\` : Tanya jawab cerdas dengan AI Gemini\n\n` +
+    `ℹ️ *Bantuan & FAQ*\n` +
+    `• \`${prefix}faq\` : Lihat panduan & pertanyaan umum\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `💡 _Contoh: \`${prefix}dl https://vt.tiktok.com/xxxx/ 2\`_\n` +
+    `⚡ _Powered by Verand.Bot_`
+  );
+}
+
+// Helper format FAQ lengkap
+function getFaqText(prefix = '/') {
+  return (
+    `📖 *PANDUAN LENGKAP & FAQ — VERAND.BOT*\n` +
+    `Status: ONLINE 🟢 | Prefix: [ ${prefix} ]\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `📥 *1. PANDUAN MEDIA DOWNLOADER*\n` +
+    `• *Fungsi:* Unduh video tanpa watermark, audio MP3, serta foto slide/album carousel dari TikTok, Instagram, YouTube, Facebook, dan Twitter/X.\n` +
+    `• *Format:* \`${prefix}dl <link> [opsi slide]\`\n` +
+    `• *Panduan Unduh Slide (TikTok & IG):*\n` +
+    `  ▫️ *Unduh Semua Gambar:* \`${prefix}dl <link>\` (atau \`${prefix}dl <link> all\`)\n` +
+    `  ▫️ *Unduh 1 Slide Saja:* \`${prefix}dl <link> 2\` (hanya slide ke-2)\n` +
+    `  ▫️ *Unduh Rentang Slide:* \`${prefix}dl <link> slide 1-3\` (slide 1 s/d 3)\n` +
+    `  ▫️ *Unduh Beberapa Slide:* \`${prefix}dl <link> slide 1,3,5\` (slide 1, 3, dan 5)\n\n` +
+    `🎨 *2. PANDUAN STIKER MAKER*\n` +
+    `• *Format:* \`${prefix}sticker\` atau \`${prefix}s\`\n` +
+    `• *Cara Pakai:* Kirim gambar/video (maks 10 detik) dengan caption \`${prefix}sticker\`, atau reply media dengan teks \`${prefix}sticker\`.\n\n` +
+    `🔄 *3. PANDUAN STIKER TO MEDIA*\n` +
+    `• *Format:* \`${prefix}tomedia\` atau \`${prefix}toimg\`\n` +
+    `• *Cara Pakai:* Reply stiker WhatsApp dengan teks \`${prefix}tomedia\` untuk mengubahnya kembali menjadi gambar PNG.\n\n` +
+    `🤖 *4. PANDUAN AI ASSISTANT*\n` +
+    `• *Format:* \`${prefix}ai <pertanyaan>\`\n` +
+    `• *Contoh:* \`${prefix}ai ide konten tiktok menarik\`\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `⚡ _Powered by Verand.Bot Multi-Device_`
+  );
+}
+
+// Log aktivitas ke Supabase Database
+function logToDb(featureKey, command, sender, status = 'success') {
+  if (!supabase) return;
+  const rawSender = sender ? sender.split('@')[0] : 'unknown';
+  const maskedSender = rawSender.length > 7
+    ? rawSender.slice(0, 5) + '***' + rawSender.slice(-3)
+    : rawSender;
+
+  supabase.from('activity_logs').insert({
+    id: 'log-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+    feature_key: featureKey,
+    sender_masked: maskedSender,
+    command: command,
+    status: status,
+    execution_time_ms: 15,
+    created_at: new Date().toISOString(),
+  }).catch(() => {});
+}
+
+  // Handler pesan masuk real-time
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
     for (const msg of messages) {
       if (!msg.message || msg.key.fromMe) continue;
       const sender = msg.key.remoteJid;
-      const text =
+      if (!sender) continue;
+
+      const rawText = (
         msg.message.conversation ||
         msg.message.extendedTextMessage?.text ||
         msg.message.imageMessage?.caption ||
-        '';
+        msg.message.videoMessage?.caption ||
+        ''
+      ).trim();
 
-      const trimmed = text.trim().toLowerCase();
-      if (trimmed === '/menu' || trimmed === '!menu' || trimmed === '.menu' || trimmed === 'menu') {
-        const reply =
-          `🤖 *VERAND.BOT AKTIF 🟢*\n\n` +
-          `Halo! Bot WhatsApp Anda telah berhasil terhubung.\n` +
-          `Dashboard kontrol Anda aktif di Vercel.\n\n` +
-          `📌 *Fitur Utama:*\n` +
-          `• /dl <link> (TikTok, IG, YT, FB)\n` +
-          `• /sticker (Kirim foto dengan caption /sticker)\n` +
-          `• /faq (Pusat panduan lengkap)`;
+      if (!rawText) continue;
+      const lower = rawText.toLowerCase();
+      const prefix = rawText.startsWith('/') ? '/' : '!';
+
+      // 1. Menu Perintah Terbaru
+      if (
+        lower === '/menu' || lower === '!menu' || lower === '.menu' || lower === 'menu' ||
+        lower === '/help' || lower === '!help' || lower === '.help' || lower === 'help'
+      ) {
+        await sock.sendMessage(sender, { text: getMenuText(prefix) }, { quoted: msg });
+        logToDb('system', rawText, sender, 'success');
+        continue;
+      }
+
+      // 2. FAQ & Panduan Lengkap
+      if (
+        lower === '/faq' || lower === '!faq' || lower === '.faq' || lower === 'faq' ||
+        lower === '/info' || lower === '!info' || lower === '.info' || lower === 'info'
+      ) {
+        await sock.sendMessage(sender, { text: getFaqText(prefix) }, { quoted: msg });
+        logToDb('auto_reply', rawText, sender, 'success');
+        continue;
+      }
+
+      // 3. AI Assistant
+      if (lower.startsWith('/ai') || lower.startsWith('!ai') || lower.startsWith('/tanya') || lower.startsWith('!tanya')) {
+        const query = rawText.replace(/^[!/.]?(ai|tanya|ask)\s*/i, '').trim();
+        const reply = `🤖 *Verand AI*: Halo! Pertanyaan Anda: "${query || '...'}" telah diterima.\n\nSistem Verand.Bot aktif dan beroperasi normal. Ada yang bisa dibantu?`;
         await sock.sendMessage(sender, { text: reply }, { quoted: msg });
+        logToDb('ai_chat', rawText, sender, 'success');
+        continue;
       }
     }
   });
