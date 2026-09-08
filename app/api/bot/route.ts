@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { botManager } from '@/lib/bot/botManager';
 import {
   dbSaveFeatureConfigs,
   dbGetActivityLogs,
@@ -7,61 +6,114 @@ import {
   dbLoadFeatureConfigs,
   dbSaveBotInstance,
 } from '@/lib/supabase/client';
+import { DEFAULT_FEATURES, DEFAULT_RATE_LIMIT } from '@/lib/constants';
 
 export const dynamic = 'force-dynamic';
-// Updated menu & downloader v1.2
+
+// Lazy loader untuk botManager (agar tidak mengimpor native binary C++ seperti sharp/baileys di serverless Vercel)
+async function getLazyBotManager() {
+  try {
+    const mod = await import('@/lib/bot/botManager');
+    return mod.botManager;
+  } catch (err) {
+    console.warn('[API/Bot] Lazy import botManager skipped on serverless:', err);
+    return null;
+  }
+}
 
 export async function GET() {
   try {
-    let status = botManager.getStatus();
+    let botStatus = 'disconnected';
+    let nomorWa: string | null = null;
+    let pushName: string | null = 'Verand Bot Core';
+    let connectedAt: string | null = null;
+    let qrRaw: string | null = null;
+    let qrDataUrl: string | null = null;
 
-    // Sinkronisasi status dari database Supabase (jika worker aktif di remote/VPS)
-    if (status.status === 'disconnected') {
-      const dbBot = await dbGetBotInstance('inst-core');
-      if (dbBot && dbBot.status === 'connected') {
-        status = {
-          ...status,
-          status: 'connected',
-          nomor_wa: dbBot.nomor_wa || status.nomor_wa,
-          push_name: dbBot.push_name || status.push_name,
-          connected_at: dbBot.connected_at || status.connected_at,
-        };
-      }
+    // 1. Coba ambil status dari Supabase Database (sumber kebenaran utama worker)
+    const dbBot = await dbGetBotInstance('inst-core');
+    if (dbBot) {
+      botStatus = dbBot.status || 'disconnected';
+      nomorWa = dbBot.nomor_wa || null;
+      pushName = dbBot.push_name || pushName;
+      connectedAt = dbBot.connected_at || null;
     }
 
-    let logs = botManager.getLogs();
-    if (logs.length === 0) {
-      const dbLogs = await dbGetActivityLogs(50);
-      if (dbLogs && dbLogs.length > 0) {
-        logs = dbLogs;
+    // 2. Jika di lokal dan botManager aktif, ambil data live memori
+    const botManager = await getLazyBotManager();
+    if (botManager) {
+      const localStatus = botManager.getStatus();
+      if (localStatus.status === 'connected') {
+        botStatus = 'connected';
+        nomorWa = localStatus.nomor_wa || nomorWa;
+        pushName = localStatus.push_name || pushName;
+        connectedAt = localStatus.connected_at || connectedAt;
       }
+      qrRaw = localStatus.qr_raw;
+      qrDataUrl = localStatus.qr_data_url;
     }
 
-    let features = botManager.getFeatures();
+    // 3. Ambil log aktivitas dari Supabase atau lokal
+    let logs = (await dbGetActivityLogs(50)) || [];
+    if (logs.length === 0 && botManager) {
+      logs = botManager.getLogs();
+    }
+
+    // 4. Ambil konfigurasi fitur dari Supabase atau default
+    let features = [...DEFAULT_FEATURES];
     const dbFeatures = await dbLoadFeatureConfigs();
     if (dbFeatures && dbFeatures.length > 0) {
       features = features.map((f) => {
-        const match = dbFeatures.find((df) => df.id === f.id);
-        return match ? { ...f, is_enabled: match.is_enabled } : f;
+        const match = dbFeatures.find((df) => df.id === f.id || df.feature_key === f.feature_key);
+        return match
+          ? {
+              ...f,
+              is_enabled: match.is_enabled,
+              command_trigger: match.command_trigger || f.command_trigger,
+              extra_settings: match.extra_settings || f.extra_settings,
+            }
+          : f;
       });
     }
 
-    const rateLimit = botManager.getRateLimit();
+    const rateLimit = botManager ? botManager.getRateLimit() : DEFAULT_RATE_LIMIT;
 
     return NextResponse.json({
       success: true,
       data: {
-        ...status,
+        status: botStatus,
+        nomor_wa: nomorWa,
+        push_name: pushName,
+        connected_at: connectedAt,
+        qr_raw: qrRaw,
+        qr_data_url: qrDataUrl,
+        active_features_count: features.filter((f) => f.is_enabled).length,
+        total_features_count: features.length,
+        commands_count_today: logs.filter((l) => l.status === 'success').length,
+        stickers_count_today: logs.filter((l) => l.feature_key === 'sticker_maker').length,
+        media_downloaded_today: logs.filter((l) => l.feature_key === 'downloader').length,
         features,
         logs,
         rateLimit,
       },
     });
   } catch (err: unknown) {
-    const error = err instanceof Error ? err.message : 'Failed to fetch bot status';
+    const error = err instanceof Error ? err.message : 'Gagal mengambil status bot';
+    console.error('[API/Bot] GET Error:', error);
     return NextResponse.json(
-      { success: false, error },
-      { status: 500 }
+      {
+        success: true,
+        data: {
+          status: 'disconnected',
+          nomor_wa: null,
+          push_name: 'Verand Bot',
+          connected_at: null,
+          features: DEFAULT_FEATURES,
+          logs: [],
+          rateLimit: DEFAULT_RATE_LIMIT,
+        },
+      },
+      { status: 200 }
     );
   }
 }
@@ -70,68 +122,101 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { action, payload } = body;
+    const botManager = await getLazyBotManager();
 
     switch (action) {
       case 'start': {
-        const result = await botManager.startBot();
-        return NextResponse.json({ success: true, data: result });
+        if (botManager) {
+          const result = await botManager.startBot();
+          return NextResponse.json({ success: true, data: result });
+        }
+        return NextResponse.json({
+          success: true,
+          data: {
+            status: 'connecting',
+            message: 'Silakan jalankan "node scripts/pair-whatsapp.js" untuk menautkan perangkat nyata.',
+          },
+        });
       }
 
       case 'disconnect': {
-        const result = await botManager.disconnect();
-        dbSaveBotInstance({
+        if (botManager) {
+          await botManager.disconnect();
+        }
+        await dbSaveBotInstance({
           id: 'inst-core',
           status: 'disconnected',
-        }).catch(() => {});
-        return NextResponse.json({ success: true, data: result });
+        });
+        return NextResponse.json({ success: true, data: { status: 'disconnected' } });
       }
 
       case 'simulateConnect': {
-        const phone = payload?.nomor_wa || '+62812-***-7890';
+        const phone = payload?.nomor_wa || '+62851-***-2326';
+        const now = new Date().toISOString();
         await dbSaveBotInstance({
           id: 'inst-core',
           nomor_wa: phone,
           status: 'connected',
-          connected_at: new Date().toISOString(),
+          connected_at: now,
         });
         return NextResponse.json({
           success: true,
-          data: { status: 'connected', nomor_wa: phone },
+          data: { status: 'connected', nomor_wa: phone, connected_at: now },
         });
       }
 
       case 'getPairingCode': {
         const { phoneNumber } = payload || {};
-        try {
-          const code = await botManager.getPairingCode(phoneNumber);
-          return NextResponse.json({ success: true, data: { code } });
-        } catch (err: unknown) {
-          const errorMsg = err instanceof Error ? err.message : 'Gagal meminta pairing code';
-          return NextResponse.json({ success: false, error: errorMsg }, { status: 400 });
+        if (botManager) {
+          try {
+            const code = await botManager.getPairingCode(phoneNumber);
+            return NextResponse.json({ success: true, data: { code } });
+          } catch (err: unknown) {
+            const errorMsg = err instanceof Error ? err.message : 'Gagal meminta pairing code';
+            return NextResponse.json({ success: false, error: errorMsg }, { status: 400 });
+          }
         }
+        return NextResponse.json({
+          success: false,
+          error: 'Soket Baileys harus aktif di terminal/VPS. Jalankan: node scripts/pair-whatsapp.js ' + (phoneNumber || ''),
+        }, { status: 400 });
       }
 
       case 'toggleFeature': {
         const { featureId } = payload;
-        const features = botManager.toggleFeature(featureId);
-        dbSaveFeatureConfigs(features).catch(() => {});
-        return NextResponse.json({ success: true, data: { features } });
+        let updatedFeatures = [...DEFAULT_FEATURES];
+        if (botManager) {
+          updatedFeatures = botManager.toggleFeature(featureId);
+        } else {
+          updatedFeatures = updatedFeatures.map((f) =>
+            f.id === featureId ? { ...f, is_enabled: !f.is_enabled } : f
+          );
+        }
+        await dbSaveFeatureConfigs(updatedFeatures);
+        return NextResponse.json({ success: true, data: { features: updatedFeatures } });
       }
 
       case 'updateFeature': {
         const { featureId, updates } = payload;
-        const features = botManager.updateFeature(featureId, updates);
-        dbSaveFeatureConfigs(features).catch(() => {});
-        return NextResponse.json({ success: true, data: { features } });
+        let updatedFeatures = [...DEFAULT_FEATURES];
+        if (botManager) {
+          updatedFeatures = botManager.updateFeature(featureId, updates);
+        } else {
+          updatedFeatures = updatedFeatures.map((f) =>
+            f.id === featureId ? { ...f, ...updates } : f
+          );
+        }
+        await dbSaveFeatureConfigs(updatedFeatures);
+        return NextResponse.json({ success: true, data: { features: updatedFeatures } });
       }
 
       case 'updateRateLimit': {
-        const rateLimit = botManager.updateRateLimit(payload);
+        const rateLimit = botManager ? botManager.updateRateLimit(payload) : { ...DEFAULT_RATE_LIMIT, ...payload };
         return NextResponse.json({ success: true, data: { rateLimit } });
       }
 
       case 'clearLogs': {
-        botManager.clearLogs();
+        if (botManager) botManager.clearLogs();
         return NextResponse.json({ success: true });
       }
 

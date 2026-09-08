@@ -1,12 +1,13 @@
 /**
- * Script Resmi Penautan WhatsApp via Pairing Code 8-Digit
- * Jalankan di terminal: node scripts/pair-whatsapp.js <nomor_wa>
- * Contoh: node scripts/pair-whatsapp.js 6281234567890
+ * Script Resmi Penautan WhatsApp via Pairing Code & QR Terminal
+ * Jalankan: node scripts/pair-whatsapp.js <nomor_wa>
+ * Contoh: node scripts/pair-whatsapp.js 6285196092326
  */
 
 const fs = require('fs');
 const path = require('path');
 const pino = require('pino');
+const QRCode = require('qrcode');
 const {
   default: makeWASocket,
   DisconnectReason,
@@ -14,7 +15,7 @@ const {
 } = require('@whiskeysockets/baileys');
 const { createClient } = require('@supabase/supabase-js');
 
-// 1. Muat kredensial dari .env.local
+// 1. Muat environment variables dari .env.local
 function loadEnv() {
   const envPath = path.join(__dirname, '..', '.env.local');
   if (fs.existsSync(envPath)) {
@@ -46,33 +47,45 @@ if (supabaseUrl && supabaseKey) {
   supabase = createClient(supabaseUrl, supabaseKey);
 }
 
-// 3. Ambil argumen nomor telepon
-let phoneNumber = process.argv[2];
-if (!phoneNumber) {
-  // Cek apakah ada di BOT_OWNER_NUMBER
-  phoneNumber = process.env.BOT_OWNER_NUMBER || '';
-}
-
-phoneNumber = (phoneNumber || '').replace(/\D/g, '');
+// 3. Ambil nomor telepon dari CLI argument
+let phoneNumber = process.argv[2] || process.env.BOT_OWNER_NUMBER || '';
+phoneNumber = phoneNumber.replace(/\D/g, '');
 
 if (!phoneNumber || phoneNumber.length < 9) {
   console.log('\n❌ NOMOR TELEPON DIPERLUKAN!');
-  console.log('Gunakan format internasional tanpa tanda +, contoh:');
-  console.log('👉 node scripts/pair-whatsapp.js 6281234567890\n');
+  console.log('Gunakan format nomor internasional (tanpa tanda +), contoh:');
+  console.log('👉 node scripts/pair-whatsapp.js 6285196092326\n');
   process.exit(1);
 }
 
-async function startPairing() {
-  console.log('\n=============================================================');
-  console.log('🤖 VERAND.BOT — GENERATOR PAIRING CODE RESMI WHATSAPP');
-  console.log('=============================================================');
-  console.log(`📱 Nomor Target : +${phoneNumber}`);
-  console.log('⏳ Menyiapkan soket koneksi Baileys...\n');
+const authDir = path.join(__dirname, '..', 'sessions', 'baileys_auth');
 
-  const authDir = path.join(__dirname, '..', 'sessions', 'baileys_auth');
-  if (!fs.existsSync(authDir)) {
-    fs.mkdirSync(authDir, { recursive: true });
+// Hapus sesi lama yang tidak lengkap jika belum terdaftar secara sah
+const credsPath = path.join(authDir, 'creds.json');
+if (fs.existsSync(credsPath)) {
+  try {
+    const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+    if (!creds.registered) {
+      console.log('🧹 Membersihkan sisa kredensial sesi sebelumnya yang belum tuntas...');
+      fs.rmSync(authDir, { recursive: true, force: true });
+    }
+  } catch {
+    fs.rmSync(authDir, { recursive: true, force: true });
   }
+}
+
+if (!fs.existsSync(authDir)) {
+  fs.mkdirSync(authDir, { recursive: true });
+}
+
+let pairingRequested = false;
+
+async function connectToWhatsApp() {
+  console.log('\n=============================================================');
+  console.log('🤖 VERAND.BOT — TAUTKAN WHATSAPP (PAIRING CODE & QR TERMINAL)');
+  console.log('=============================================================');
+  console.log(`📱 Nomor WhatsApp Target : +${phoneNumber}`);
+  console.log('⏳ Menghubungkan soket Baileys ke server WhatsApp...\n');
 
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
@@ -80,16 +93,24 @@ async function startPairing() {
     auth: state,
     printQRInTerminal: false,
     logger: pino({ level: 'silent' }),
-    browser: ['Verand Bot', 'Chrome', '120.0.0'],
+    // Gunakan user-agent browser standar agar tidak ditolak oleh WhatsApp (503)
+    browser: ['Ubuntu', 'Chrome', '20.0.04'],
   });
 
   sock.ev.on('creds.update', saveCreds);
 
-  // Jika belum terdaftar, minta pairing code resmi dari WhatsApp
-  if (!sock.authState.creds.registered) {
-    setTimeout(async () => {
+  sock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect, qr } = update;
+
+    // Saat server WhatsApp siap menerima otentikasi (ditandai dengan munculnya QR / auth handshake)
+    if (qr && !sock.authState.creds.registered && !pairingRequested) {
+      pairingRequested = true;
+
       try {
-        console.log('📡 Menghubungkan ke server WhatsApp untuk meminta kode resmi...');
+        console.log('📡 Meminta Pairing Code 8-Digit resmi dari server WhatsApp...');
+        // Tunggu jeda singkat agar soket handshake mantap
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+
         const code = await sock.requestPairingCode(phoneNumber);
         const formatted = code?.match(/.{1,4}/g)?.join('-') || code;
 
@@ -98,28 +119,35 @@ async function startPairing() {
         console.log('╠════════════════════════════════════════════════════════════╣');
         console.log(`║                  👉   ${formatted}   👈                  ║`);
         console.log('╚════════════════════════════════════════════════════════════╝\n');
-        console.log('📋 PANDUAN MEMASUKKAN KODE DI HP:');
+        console.log('📋 CARA MEMASUKKAN DI HP ANDA:');
         console.log(' 1. Buka aplikasi WhatsApp di HP Anda.');
-        console.log(' 2. Ketuk ikon Titik Tiga (atau Pengaturan) > "Perangkat Tertaut".');
+        console.log(' 2. Ketuk ikon Titik Tiga (Pengaturan) > "Perangkat Tertaut".');
         console.log(' 3. Ketuk tombol "Tautkan Perangkat".');
-        console.log(' 4. Di bagian bawah layar scan QR, ketuk "Tautkan dengan nomor telepon saja".');
-        console.log(` 5. Masukkan 8 karakter kode di atas: ${formatted}\n`);
-        console.log('⏳ Menunggu otorisasi dari HP Anda (berlaku ±60 detik)...\n');
+        console.log(' 4. Di bawah layar kamera scanner, ketuk: "Tautkan dengan nomor telepon saja".');
+        console.log(` 5. Masukkan 8 digit kode di atas: ${formatted}\n`);
+        console.log('─────────────────────────────────────────────────────────────');
+        console.log('💡 ATAU SCAN QR CODE BERIKUT DENGAN KAMERA WHATSAPP ANDA:');
+        try {
+          const qrString = await QRCode.toString(qr, { type: 'terminal', small: true });
+          console.log(qrString);
+        } catch {
+          // fallback
+        }
+        console.log('⏳ Menunggu konfirmasi dari HP Anda (berlaku ±60 detik)...\n');
       } catch (err) {
-        console.error('❌ Gagal meminta pairing code dari WhatsApp:', err.message);
-        console.log('💡 Pastikan nomor telepon sudah benar dan memiliki awalan kode negara (misal 628...)');
+        console.warn('⚠️ Gagal meminta pairing code, silakan gunakan QR Code di atas:', err.message);
+        try {
+          const qrString = await QRCode.toString(qr, { type: 'terminal', small: true });
+          console.log(qrString);
+        } catch {
+          // fallback
+        }
       }
-    }, 3000);
-  } else {
-    console.log('ℹ️ Akun sudah memiliki sesi auth yang tersimpan.');
-  }
-
-  sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect } = update;
+    }
 
     if (connection === 'open') {
       console.log('\n🎉 =========================================================');
-      console.log('✅ WHATSAPP BERHASIL TERTAUT & TERKONEKSI SEMPURNA!');
+      console.log('✅ WHATSAPP BERHASIL TERTAUT & AKTIF 100%!');
       console.log('=========================================================');
 
       const rawId = sock?.user?.id || '';
@@ -128,10 +156,10 @@ async function startPairing() {
         ? '+' + cleanNum.slice(0, 5) + '-***-' + cleanNum.slice(-4)
         : cleanNum;
 
-      console.log(`📞 Nomor Terhubung : ${masked}`);
-      console.log(`👤 Nama Profil     : ${sock?.user?.name || 'Verand Bot'}`);
+      console.log(`📞 Nomor Bot Aktif : ${masked}`);
+      console.log(`👤 Nama Akun       : ${sock?.user?.name || 'Verand Bot'}`);
 
-      // Simpan ke Supabase agar Dashboard Vercel otomatis TERHUBUNG
+      // Sinkronkan ke Supabase Database
       if (supabase) {
         console.log('🔄 Menyinkronkan status ke Supabase Database...');
         try {
@@ -141,23 +169,28 @@ async function startPairing() {
             status: 'connected',
             created_at: new Date().toISOString(),
           });
-          console.log('🌐 Sukses! Buka dashboard Vercel Anda, status sudah TERHUBUNG!');
+          console.log('🌐 Status Dashboard Vercel Anda sekarang TERHUBUNG (ONLINE 🟢)!');
         } catch (e) {
-          console.warn('⚠️ Gagal update Supabase:', e.message);
+          console.warn('⚠️ Update Supabase info:', e.message);
         }
       }
 
-      console.log('\n💡 Biarkan proses ini tetap menyala agar bot terus melayani pesan.');
+      console.log('\n⚡ Bot sekarang sedang berjalan aktif melayani perintah WhatsApp.');
+      console.log('💡 Coba kirim pesan "/menu" dari nomor WhatsApp lain ke nomor ini!');
+      console.log('💡 Tekan Ctrl + C di terminal jika ingin menghentikan bot.');
     }
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
-      console.log(`\n⚠️ Koneksi terputus (Status: ${statusCode || 'unknown'}).`);
+      console.log(`\n⚠️ Koneksi Baileys tertutup (Status: ${statusCode || 'unknown'}).`);
 
       if (isLoggedOut) {
-        console.log('❌ Sesi telah dikeluarkan dari WhatsApp (Logged Out).');
+        console.log('❌ Sesi WhatsApp telah di-logout. Menghapus data sesi lokal...');
+        if (fs.existsSync(authDir)) {
+          fs.rmSync(authDir, { recursive: true, force: true });
+        }
         if (supabase) {
           await supabase.from('bot_instances').upsert({
             id: 'inst-core',
@@ -166,11 +199,39 @@ async function startPairing() {
         }
         process.exit(0);
       } else {
-        console.log('🔄 Mencoba menghubungkan ulang...');
-        startPairing();
+        console.log('🔄 Menyambungkan ulang ke server WhatsApp...');
+        pairingRequested = false;
+        setTimeout(connectToWhatsApp, 3000);
+      }
+    }
+  });
+
+  // Handler pesan sederhana agar bot bisa langsung membalas /menu
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (type !== 'notify') return;
+    for (const msg of messages) {
+      if (!msg.message || msg.key.fromMe) continue;
+      const sender = msg.key.remoteJid;
+      const text =
+        msg.message.conversation ||
+        msg.message.extendedTextMessage?.text ||
+        msg.message.imageMessage?.caption ||
+        '';
+
+      const trimmed = text.trim().toLowerCase();
+      if (trimmed === '/menu' || trimmed === '!menu' || trimmed === '.menu' || trimmed === 'menu') {
+        const reply =
+          `🤖 *VERAND.BOT AKTIF 🟢*\n\n` +
+          `Halo! Bot WhatsApp Anda telah berhasil terhubung.\n` +
+          `Dashboard kontrol Anda aktif di Vercel.\n\n` +
+          `📌 *Fitur Utama:*\n` +
+          `• /dl <link> (TikTok, IG, YT, FB)\n` +
+          `• /sticker (Kirim foto dengan caption /sticker)\n` +
+          `• /faq (Pusat panduan lengkap)`;
+        await sock.sendMessage(sender, { text: reply }, { quoted: msg });
       }
     }
   });
 }
 
-startPairing();
+connectToWhatsApp();
