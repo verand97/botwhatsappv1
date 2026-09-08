@@ -12,6 +12,7 @@ import fs from 'fs';
 import pino from 'pino';
 import { addExifToWebp } from './exif';
 import { downloadMediaFromUrl, parseSlideRequest, downloadMediaBuffer } from './mediaDownloader';
+import { generateMenuText, generateFaqText } from './menuHelper';
 import { ActivityLog, FeatureConfig, RateLimitConfig, BotConnectionStatus } from '../types';
 
 // Default initial features
@@ -603,15 +604,7 @@ class BotManager {
       lower === '/help' ||
       lower === '.help'
     ) {
-      const activeList = this.features
-        .filter((f) => f.is_enabled)
-        .map((f) => {
-          const baseName = f.command_trigger.replace(/^[!/.]/, '');
-          return ` · *${prefix}${baseName}* : ${f.name}`;
-        })
-        .join('\n');
-
-      const menuText = `⚙️ *VERAND.BOT — PUSAT KONTROL*\nStatus: ONLINE 🟢\nPrefix: [ ${prefix} ]\n\n*Daftar Modul Aktif:*\n${activeList}\n\nKirim perintah di atas untuk berinteraksi!`;
+      const menuText = generateMenuText(prefix, this.features);
 
       await this.sock.sendMessage(remoteJid, { text: menuText }, { quoted: msg });
 
@@ -862,24 +855,54 @@ class BotManager {
       return;
     }
 
-    // 7. Auto-Reply Keyword (§5.2)
+    // 7. Auto-Reply & FAQ (§5.2)
     const autoFeat = this.features.find((f) => f.feature_key === 'auto_reply');
-    if (autoFeat && autoFeat.is_enabled && autoFeat.extra_settings.auto_replies) {
-      const match = autoFeat.extra_settings.auto_replies.find((r) =>
-        lower.includes(r.trigger.toLowerCase())
-      );
-      if (match) {
-        await this.sock.sendMessage(remoteJid, { text: `💬 ${match.response}` }, { quoted: msg });
+    if (autoFeat && autoFeat.is_enabled) {
+      const isFaqCmd =
+        lower === `${prefix}faq` ||
+        lower === `${prefix}info` ||
+        lower === '!faq' ||
+        lower === '/faq' ||
+        lower === '.faq' ||
+        lower === '!info' ||
+        lower === '/info' ||
+        lower === '.info' ||
+        lower === 'faq' ||
+        lower === 'info' ||
+        autoFeat.aliases.some((a) => lower === a);
+
+      if (isFaqCmd) {
+        const faqText = generateFaqText(prefix, autoFeat.extra_settings?.auto_replies);
+        await this.sock.sendMessage(remoteJid, { text: faqText }, { quoted: msg });
         this.addLog({
           feature_key: 'auto_reply',
           feature_name: 'Auto-Reply & FAQ',
           command: cleanText,
           sender_masked: maskedSender,
           status: 'success',
-          execution_time_ms: 30,
-          detail: `Trigger matched: "${match.trigger}"`,
+          execution_time_ms: 20,
+          detail: 'FAQ dan panduan bot dikirimkan ke pengguna.',
         });
         return;
+      }
+
+      if (autoFeat.extra_settings?.auto_replies) {
+        const match = autoFeat.extra_settings.auto_replies.find((r) =>
+          lower.includes(r.trigger.toLowerCase())
+        );
+        if (match) {
+          await this.sock.sendMessage(remoteJid, { text: `💬 ${match.response}` }, { quoted: msg });
+          this.addLog({
+            feature_key: 'auto_reply',
+            feature_name: 'Auto-Reply & FAQ',
+            command: cleanText,
+            sender_masked: maskedSender,
+            status: 'success',
+            execution_time_ms: 30,
+            detail: `Trigger matched: "${match.trigger}"`,
+          });
+          return;
+        }
       }
     }
   }

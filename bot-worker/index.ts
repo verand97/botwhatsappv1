@@ -13,6 +13,7 @@ import { Boom } from '@hapi/boom';
 import { handleStickerMaker } from './handlers/stickerMaker';
 import { handleDownloader } from './handlers/downloader';
 import { checkRateLimit } from './middleware/rateLimiter';
+import { generateMenuText, generateFaqText } from '../lib/bot/menuHelper';
 
 export async function startWhatsAppWorker() {
   const { state, saveCreds } = await initMultiFileAuthState('baileys_auth_info');
@@ -66,17 +67,62 @@ export async function startWhatsAppWorker() {
       }
 
       // 2. Dispatch Handler Perintah
-      if (text.startsWith('!s') || text.startsWith('!sticker')) {
+      const lower = text.trim().toLowerCase();
+
+      // Menu Command
+      if (
+        lower === '!menu' ||
+        lower === '/menu' ||
+        lower === '.menu' ||
+        lower === 'menu' ||
+        lower === '!help' ||
+        lower === '/help' ||
+        lower === 'help'
+      ) {
+        const prefix = text.startsWith('/') ? '/' : '!';
+        const menuText = generateMenuText(prefix);
+        await sock.sendMessage(sender, { text: menuText }, { quoted: msg });
+        continue;
+      }
+
+      // FAQ Command
+      if (
+        lower === '!faq' ||
+        lower === '/faq' ||
+        lower === '.faq' ||
+        lower === 'faq' ||
+        lower === '!info' ||
+        lower === '/info' ||
+        lower === 'info'
+      ) {
+        const prefix = text.startsWith('/') ? '/' : '!';
+        const faqText = generateFaqText(prefix);
+        await sock.sendMessage(sender, { text: faqText }, { quoted: msg });
+        continue;
+      }
+
+      if (
+        text.startsWith('!s') ||
+        text.startsWith('!sticker') ||
+        text.startsWith('/s') ||
+        text.startsWith('/sticker')
+      ) {
         await handleStickerMaker(sock, msg);
       } else if (
         text.startsWith('!dl') ||
+        text.startsWith('/dl') ||
         text.startsWith('!tt') ||
+        text.startsWith('/tt') ||
         text.startsWith('!yt') ||
+        text.startsWith('/yt') ||
         text.startsWith('!ig') ||
+        text.startsWith('/ig') ||
         text.startsWith('!fb') ||
+        text.startsWith('/fb') ||
         text.startsWith('!twitter') ||
+        text.startsWith('/twitter') ||
         text.startsWith('!ytmp3') ||
-        text.startsWith('/dl')
+        text.startsWith('/ytmp3')
       ) {
         await handleDownloader(sock, msg);
       }

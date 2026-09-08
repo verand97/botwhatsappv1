@@ -8,6 +8,7 @@ import {
   RateLimitConfig,
   UsageStatPoint,
 } from '../types';
+import { generateMenuText, generateFaqText } from '../bot/menuHelper';
 
 // REAL initial state without any dummy / fake data
 const REAL_INITIAL_BOT: BotInstance = {
@@ -409,13 +410,36 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
     }
 
     // Menu
-    if (lower === `${prefix}menu` || lower === 'menu') {
-      const activeList = features
-        .filter((f) => f.is_enabled)
-        .map((f) => `• ${f.command_trigger} : ${f.name}`)
-        .join('\n');
+    if (
+      lower === `${prefix}menu` ||
+      lower === 'menu' ||
+      lower === '!menu' ||
+      lower === '/menu' ||
+      lower === '.menu' ||
+      lower === `${prefix}help` ||
+      lower === 'help' ||
+      lower === '!help' ||
+      lower === '/help'
+    ) {
       return {
-        response: `⚙️ *VERAND.BOT — MENU AKTIF*\nStatus: ONLINE 🟢\nPrefix: [ ${prefix} ]\n\n*Daftar Modul:*\n${activeList}`,
+        response: generateMenuText(prefix, features),
+        success: true,
+      };
+    }
+
+    // Auto-Reply & FAQ
+    if (
+      lower === `${prefix}faq` ||
+      lower === 'faq' ||
+      lower === '!faq' ||
+      lower === '/faq' ||
+      lower === `${prefix}info` ||
+      lower === 'info' ||
+      lower === '!info'
+    ) {
+      const faqFeat = features.find((f) => f.feature_key === 'auto_reply');
+      return {
+        response: generateFaqText(prefix, faqFeat?.extra_settings?.auto_replies),
         success: true,
       };
     }
