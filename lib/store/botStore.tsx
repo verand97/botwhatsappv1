@@ -448,26 +448,69 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
         return {
           response:
             `📥 *Media Downloader — Verand.Bot*\n\n` +
-            `Sertakan link media!\nContoh: *${prefix}dl https://vt.tiktok.com/ZSjXbxxxx/*\n\n` +
-            `*Format didukung:* TikTok (No-WM), YouTube (MP4/MP3), Facebook (HD), Instagram, Twitter/X.`,
+            `Sertakan link media!\n` +
+            `*Contoh Unduh Semua:* ${prefix}dl https://vt.tiktok.com/xxxxxx/\n` +
+            `*Contoh Unduh Per Slide:* ${prefix}dl <url> 2 (atau: slide 2, slide 1-3, all)\n\n` +
+            `*Format didukung:* TikTok (No-WM/Slides), Instagram (Reels/Carousels), YouTube (MP4/MP3), Facebook (HD), Twitter/X.`,
           success: false,
         };
       }
       const url = urlMatch[0];
+      const afterUrl = cleanMsg.replace(url, '').replace(/^[!/.]\w+\s*/i, '').trim();
+      const slideMatch = afterUrl.match(/(?:slide|slides|halaman|hlm|foto)?\s*([0-9\-,]+|all|semua)\b/i);
       const isAudio = lower.includes('ytmp3') || lower.includes('audio') || lower.includes('mp3');
+
       let platform = 'Media';
-      if (url.includes('tiktok.com')) platform = 'TikTok (No-Watermark)';
+      const isTikTok = url.includes('tiktok.com');
+      const isInstagram = url.includes('instagram.com');
+
+      if (isTikTok) platform = 'TikTok';
       else if (url.includes('youtu')) platform = isAudio ? 'YouTube Audio (MP3)' : 'YouTube Video (MP4)';
-      else if (url.includes('instagram.com')) platform = 'Instagram Reels/Post';
+      else if (isInstagram) platform = 'Instagram';
       else if (url.includes('facebook.com') || url.includes('fb.watch')) platform = 'Facebook HD Video';
       else if (url.includes('twitter.com') || url.includes('x.com')) platform = 'Twitter/X Video';
+
+      if ((isTikTok || isInstagram) && slideMatch) {
+        const slideArg = slideMatch[1];
+        return {
+          response:
+            `✅ [Simulasi Media Downloader Sukses]\n` +
+            `📸 *Platform:* ${platform} (Foto / Slides)\n` +
+            `🔗 *Tautan:* ${url}\n` +
+            `🖼️ *Mode:* Unduh Slide [${slideArg}]\n` +
+            `📦 *Status:* Berhasil mengekstrak foto slide yang diminta (${slideArg}) dan siap dikirim dengan resolusi penuh.`,
+          success: true,
+        };
+      }
+
+      if (isTikTok) {
+        return {
+          response:
+            `✅ [Simulasi Media Downloader Sukses]\n` +
+            `🎬 *Platform:* TikTok (No-Watermark Video / Slides)\n` +
+            `🔗 *Tautan:* ${url}\n` +
+            `📦 *Status:* Terdeteksi dan siap dikirim sebagai file Video MP4 tanpa watermark atau semua foto slide jika postingan berupa album.`,
+          success: true,
+        };
+      }
+
+      if (isInstagram) {
+        return {
+          response:
+            `✅ [Simulasi Media Downloader Sukses]\n` +
+            `🎬 *Platform:* Instagram (Reel / Carousel)\n` +
+            `🔗 *Tautan:* ${url}\n` +
+            `📦 *Status:* Terdeteksi dan siap dikirim sebagai video Reel atau semua foto album carousel tanpa batasan.`,
+          success: true,
+        };
+      }
 
       return {
         response:
           `✅ [Simulasi Media Downloader Sukses]\n` +
           `🎬 *Platform:* ${platform}\n` +
           `🔗 *Tautan:* ${url}\n` +
-          `📦 *Status:* Berhasil diekstrak dan siap dikirim sebagai file ${isAudio ? 'Audio MP3' : 'Video MP4'} tanpa watermark.`,
+          `📦 *Status:* Berhasil diekstrak dan siap dikirim sebagai file ${isAudio ? 'Audio MP3' : 'Video MP4'}.`,
         success: true,
       };
     }

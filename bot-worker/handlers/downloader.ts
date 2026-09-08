@@ -1,10 +1,10 @@
 /**
  * Handler Media Downloader (§5.1)
- * Unduh TikTok (No-WM), YouTube (MP4/MP3), Facebook, Twitter, Instagram
+ * Unduh TikTok (No-WM/Slides/Audio), YouTube (MP4/MP3), Facebook, Twitter, Instagram (Reels/Carousels)
  */
 
 import { WASocket, proto } from '@whiskeysockets/baileys';
-import { downloadMediaFromUrl } from '../../lib/bot/mediaDownloader';
+import { downloadMediaFromUrl, parseSlideRequest, downloadMediaBuffer } from '../../lib/bot/mediaDownloader';
 
 export async function handleDownloader(sock: WASocket, msg: proto.IWebMessageInfo) {
   const remoteJid = msg.key.remoteJid;
@@ -16,23 +16,32 @@ export async function handleDownloader(sock: WASocket, msg: proto.IWebMessageInf
     msg.message?.imageMessage?.caption ||
     '';
 
-  const urlMatch = text.match(/https?:\/\/[^\s]+/i);
-  if (!urlMatch) {
+  const parsedReq = parseSlideRequest(text);
+  if (!parsedReq) {
     await sock.sendMessage(
       remoteJid,
       {
         text:
           '📥 *Media Downloader — Verand.Bot*\n\n' +
           'Sertakan link media yang ingin diunduh!\n' +
-          'Contoh:\n*!dl https://vt.tiktok.com/xxxxxx/*\n\n' +
-          'Format yang didukung: *TikTok*, *YouTube*, *Instagram*, *Facebook*, *Twitter/X*',
+          '*Contoh Unduh Semua:* !dl https://vt.tiktok.com/xxxxxx/\n' +
+          '*Contoh Unduh Per Slide:* !dl <url> 2 (atau: slide 2, slide 1-3, slide 1,3, all)\n\n' +
+          '*Perintah Cepat:*\n' +
+          '• *!tt <url> [slide]* : Unduh video/audio/slide TikTok tanpa watermark\n' +
+          '• *!ig <url> [slide]* : Unduh video Reels / carousel foto Instagram\n' +
+          '• *!yt <url>* : Unduh video YouTube (MP4)\n' +
+          '• *!ytmp3 <url>* : Unduh audio YouTube (MP3)\n' +
+          '• *!fb <url>* : Unduh video Facebook HD/SD\n' +
+          '• *!twitter <url>* : Unduh video Twitter/X\n\n' +
+          '_Tips Foto Slide:_ Ketik nomor slide (misal *!tt <url> 3* atau *!ig <url> slide 1-4*) atau kirim link saja untuk langsung mengunduh semua foto!',
       },
       { quoted: msg }
     );
     return;
   }
 
-  const url = urlMatch[0];
+  const url = parsedReq.url;
+  const slideIndices = parsedReq.slideIndices;
   const lower = text.toLowerCase();
   const isAudioOnly =
     lower.includes('ytmp3') ||
@@ -44,9 +53,10 @@ export async function handleDownloader(sock: WASocket, msg: proto.IWebMessageInf
     // Send wait reaction if supported
     await sock.sendMessage(remoteJid, { react: { text: '⏳', key: msg.key } }).catch(() => {});
 
-    const result = await downloadMediaFromUrl(url, { isAudioOnly });
+    const result = await downloadMediaFromUrl(url, { isAudioOnly, slideIndices });
 
     if (!result.success) {
+      await sock.sendMessage(remoteJid, { react: { text: '❌', key: msg.key } }).catch(() => {});
       await sock.sendMessage(
         remoteJid,
         {
@@ -102,23 +112,48 @@ export async function handleDownloader(sock: WASocket, msg: proto.IWebMessageInf
         );
       }
     } else if (result.type === 'images' && result.images && result.images.length > 0) {
-      await sock.sendMessage(
-        remoteJid,
-        {
-          image: { url: result.images[0] },
-          caption: result.caption,
-        },
-        { quoted: msg }
-      );
-      for (let i = 1; i < Math.min(result.images.length, 10); i++) {
-        await sock.sendMessage(remoteJid, { image: { url: result.images[i] } });
+      const totalImgs = result.images.length;
+      const totalSlides = result.totalSlides || totalImgs;
+      const selectedIndices = result.selectedSlideIndices || result.images.map((_, i) => i + 1);
+
+      for (let i = 0; i < totalImgs; i++) {
+        const isFirst = i === 0;
+        const imgUrl = result.images[i];
+        const slideNum = selectedIndices[i] || i + 1;
+
+        let slideCaption = '';
+        if (totalImgs === 1) {
+          slideCaption = result.caption || `📸 Slide ${slideNum} dari ${totalSlides}`;
+        } else if (isFirst) {
+          slideCaption = `${result.caption}\n\n🖼️ *[1/${totalImgs}] Slide ${slideNum} dari ${totalSlides}*`;
+        } else {
+          slideCaption = `🖼️ *[${i + 1}/${totalImgs}] Slide ${slideNum} dari ${totalSlides}*`;
+        }
+
+        // Safely download buffer to avoid CDN 403 Forbidden
+        const imgBuffer = await downloadMediaBuffer(imgUrl, 20 * 1024 * 1024);
+        const mediaContent = imgBuffer ? { image: imgBuffer } : { image: { url: imgUrl } };
+
+        await sock.sendMessage(
+          remoteJid,
+          {
+            ...mediaContent,
+            caption: slideCaption,
+          },
+          { quoted: isFirst ? msg : undefined }
+        );
+
+        if (i < totalImgs - 1) {
+          await new Promise((r) => setTimeout(r, 650));
+        }
       }
     }
 
     await sock.sendMessage(remoteJid, { react: { text: '✅', key: msg.key } }).catch(() => {});
-    console.log(`[DOWNLOADER SUKSES] ${result.platform.toUpperCase()} dikirim ke ${remoteJid.slice(0, 6)}***`);
+    console.log(`[DOWNLOADER SUKSES] ${result.platform.toUpperCase()} (${result.type}) dikirim ke ${remoteJid.slice(0, 6)}***`);
   } catch (error) {
     console.error('[DOWNLOADER ERROR]', error);
+    await sock.sendMessage(remoteJid, { react: { text: '❌', key: msg.key } }).catch(() => {});
     await sock.sendMessage(
       remoteJid,
       {

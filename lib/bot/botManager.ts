@@ -11,7 +11,7 @@ import path from 'path';
 import fs from 'fs';
 import pino from 'pino';
 import { addExifToWebp } from './exif';
-import { downloadMediaFromUrl } from './mediaDownloader';
+import { downloadMediaFromUrl, parseSlideRequest, downloadMediaBuffer } from './mediaDownloader';
 import { ActivityLog, FeatureConfig, RateLimitConfig, BotConnectionStatus } from '../types';
 
 // Default initial features
@@ -669,26 +669,28 @@ class BotManager {
         dlFeat.aliases.some((a) => lower.startsWith(a)));
 
     if (isDlCmd && dlFeat) {
-      const urlMatch = cleanText.match(/https?:\/\/[^\s]+/i);
-      if (!urlMatch) {
+      const parsedReq = parseSlideRequest(cleanText);
+      if (!parsedReq) {
         const helpText =
           `📥 *Media Downloader Verand.Bot*\n\n` +
           `Sertakan link media yang ingin diunduh!\n` +
-          `*Contoh:* ${prefix}dl https://vt.tiktok.com/xxxxxx/\n\n` +
+          `*Contoh Unduh Semua:* ${prefix}dl https://vt.tiktok.com/xxxxxx/\n` +
+          `*Contoh Unduh Per Slide:* ${prefix}dl <url> 2 (atau: slide 2, slide 1-3, slide 1,3, all)\n\n` +
           `*Perintah Cepat:*\n` +
-          `• *!tt <url>* : Unduh video/audio TikTok tanpa watermark\n` +
+          `• *!tt <url> [slide]* : Unduh video/audio/slide TikTok tanpa watermark\n` +
+          `• *!ig <url> [slide]* : Unduh video Reels / carousel foto Instagram\n` +
           `• *!yt <url>* : Unduh video YouTube (MP4)\n` +
           `• *!ytmp3 <url>* : Unduh audio YouTube (MP3)\n` +
           `• *!fb <url>* : Unduh video Facebook HD/SD\n` +
-          `• *!ig <url>* : Unduh video Reels / Foto Instagram\n` +
           `• *!twitter <url>* : Unduh video Twitter/X\n\n` +
-          `_Didukung: TikTok, YouTube, Instagram, Facebook, Twitter/X_`;
+          `_Tips Foto Slide:_ Ketik nomor slide (misal *!tt <url> 3* atau *!ig <url> slide 1-4*) atau kirim link saja untuk langsung mengunduh semua foto!`;
 
         await this.sock.sendMessage(remoteJid, { text: helpText }, { quoted: msg });
         return;
       }
 
-      const targetUrl = urlMatch[0];
+      const targetUrl = parsedReq.url;
+      const slideIndices = parsedReq.slideIndices;
       const isAudioOnly =
         lower.includes('ytmp3') ||
         lower.includes('--audio') ||
@@ -705,7 +707,7 @@ class BotManager {
       } catch {}
 
       try {
-        const result = await downloadMediaFromUrl(targetUrl, { isAudioOnly });
+        const result = await downloadMediaFromUrl(targetUrl, { isAudioOnly, slideIndices });
 
         if (!result.success) {
           try {
@@ -775,19 +777,39 @@ class BotManager {
             );
           }
         } else if (result.type === 'images' && result.images && result.images.length > 0) {
-          const maxImgs = Math.min(result.images.length, 10);
-          for (let i = 0; i < maxImgs; i++) {
+          const totalImgs = result.images.length;
+          const totalSlides = result.totalSlides || totalImgs;
+          const selectedIndices = result.selectedSlideIndices || result.images.map((_, i) => i + 1);
+
+          for (let i = 0; i < totalImgs; i++) {
             const isFirst = i === 0;
+            const imgUrl = result.images[i];
+            const slideNum = selectedIndices[i] || i + 1;
+
+            let slideCaption = '';
+            if (totalImgs === 1) {
+              slideCaption = result.caption || `📸 Slide ${slideNum} dari ${totalSlides}`;
+            } else if (isFirst) {
+              slideCaption = `${result.caption}\n\n🖼️ *[1/${totalImgs}] Slide ${slideNum} dari ${totalSlides}*`;
+            } else {
+              slideCaption = `🖼️ *[${i + 1}/${totalImgs}] Slide ${slideNum} dari ${totalSlides}*`;
+            }
+
+            // Safely download buffer to avoid CDN 403 Forbidden
+            const imgBuffer = await downloadMediaBuffer(imgUrl, 20 * 1024 * 1024);
+            const mediaContent = imgBuffer ? { image: imgBuffer } : { image: { url: imgUrl } };
+
             await this.sock.sendMessage(
               remoteJid,
               {
-                image: { url: result.images[i] },
-                caption: isFirst ? result.caption : undefined,
+                ...mediaContent,
+                caption: slideCaption,
               },
               { quoted: isFirst ? msg : undefined }
             );
-            if (i < maxImgs - 1) {
-              await new Promise((r) => setTimeout(r, 600));
+
+            if (i < totalImgs - 1) {
+              await new Promise((r) => setTimeout(r, 650));
             }
           }
         }
