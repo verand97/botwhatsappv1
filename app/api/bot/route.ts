@@ -1,13 +1,34 @@
 import { NextResponse } from 'next/server';
 import { botManager } from '@/lib/bot/botManager';
-import { dbSaveFeatureConfigs, dbGetActivityLogs } from '@/lib/supabase/client';
+import {
+  dbSaveFeatureConfigs,
+  dbGetActivityLogs,
+  dbGetBotInstance,
+  dbLoadFeatureConfigs,
+  dbSaveBotInstance,
+} from '@/lib/supabase/client';
 
 export const dynamic = 'force-dynamic';
 // Updated menu & downloader v1.2
 
 export async function GET() {
   try {
-    const status = botManager.getStatus();
+    let status = botManager.getStatus();
+
+    // Sinkronisasi status dari database Supabase (jika worker aktif di remote/VPS)
+    if (status.status === 'disconnected') {
+      const dbBot = await dbGetBotInstance('inst-core');
+      if (dbBot && dbBot.status === 'connected') {
+        status = {
+          ...status,
+          status: 'connected',
+          nomor_wa: dbBot.nomor_wa || status.nomor_wa,
+          push_name: dbBot.push_name || status.push_name,
+          connected_at: dbBot.connected_at || status.connected_at,
+        };
+      }
+    }
+
     let logs = botManager.getLogs();
     if (logs.length === 0) {
       const dbLogs = await dbGetActivityLogs(50);
@@ -15,7 +36,16 @@ export async function GET() {
         logs = dbLogs;
       }
     }
-    const features = botManager.getFeatures();
+
+    let features = botManager.getFeatures();
+    const dbFeatures = await dbLoadFeatureConfigs();
+    if (dbFeatures && dbFeatures.length > 0) {
+      features = features.map((f) => {
+        const match = dbFeatures.find((df) => df.id === f.id);
+        return match ? { ...f, is_enabled: match.is_enabled } : f;
+      });
+    }
+
     const rateLimit = botManager.getRateLimit();
 
     return NextResponse.json({
@@ -49,7 +79,25 @@ export async function POST(req: Request) {
 
       case 'disconnect': {
         const result = await botManager.disconnect();
+        dbSaveBotInstance({
+          id: 'inst-core',
+          status: 'disconnected',
+        }).catch(() => {});
         return NextResponse.json({ success: true, data: result });
+      }
+
+      case 'simulateConnect': {
+        const phone = payload?.nomor_wa || '+62812-***-7890';
+        await dbSaveBotInstance({
+          id: 'inst-core',
+          nomor_wa: phone,
+          status: 'connected',
+          connected_at: new Date().toISOString(),
+        });
+        return NextResponse.json({
+          success: true,
+          data: { status: 'connected', nomor_wa: phone },
+        });
       }
 
       case 'toggleFeature': {

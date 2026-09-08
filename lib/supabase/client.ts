@@ -78,6 +78,36 @@ export async function dbSaveBotInstance(bot: Partial<BotInstance>) {
 }
 
 /**
+ * Fetch bot instance status from Supabase
+ */
+export async function dbGetBotInstance(id: string = 'inst-core'): Promise<Partial<BotInstance> | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('bot_instances')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return {
+      id: data.id,
+      nomor_wa: data.nomor_wa || undefined,
+      push_name: data.push_name || 'Verand Bot',
+      status: data.status || 'disconnected',
+      connected_at: data.created_at || undefined,
+      session_name: data.session_data?.session_name || 'inst-core',
+      uptime_seconds: 0,
+    };
+  } catch (err) {
+    console.warn('[Supabase] Get bot instance exception:', err);
+    return null;
+  }
+}
+
+/**
  * Persist feature configs to Supabase
  */
 export async function dbSaveFeatureConfigs(features: FeatureConfig[]) {

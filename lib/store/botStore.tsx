@@ -135,6 +135,7 @@ interface BotContextType {
   updateFeatureTrigger: (featureId: string, newTrigger: string) => void;
   updateFeatureSettings: (featureId: string, settings: Partial<FeatureConfig['extra_settings']>) => void;
   connectBot: () => void;
+  simulateConnect: (phone?: string) => void;
   disconnectBot: () => void;
   setConnecting: () => void;
   addLog: (log: Omit<ActivityLog, 'id' | 'created_at'>) => void;
@@ -231,6 +232,31 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
       syncFromBackend();
     } catch (err) {
       console.error('Error connecting bot:', err);
+    }
+  };
+
+  const simulateConnect = async (phone: string = '+62812-***-7890') => {
+    const connectedAt = new Date().toISOString();
+    setBotInstance((prev) => ({
+      ...prev,
+      status: 'connected',
+      nomor_wa: phone,
+      push_name: 'Verand Bot Demo',
+      connected_at: connectedAt,
+      is_active: true,
+    }));
+    setQrDataUrl(null);
+    setQrRaw(null);
+
+    try {
+      await fetch('/api/bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'simulateConnect', payload: { nomor_wa: phone } }),
+      });
+      syncFromBackend();
+    } catch {
+      // Offline fallback
     }
   };
 
@@ -560,6 +586,7 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
         updateFeatureTrigger,
         updateFeatureSettings,
         connectBot,
+        simulateConnect,
         disconnectBot,
         setConnecting,
         addLog,

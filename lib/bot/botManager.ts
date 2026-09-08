@@ -9,6 +9,7 @@ import QRCode from 'qrcode';
 import sharp from 'sharp';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import pino from 'pino';
 import { addExifToWebp } from './exif';
 import { downloadMediaFromUrl, parseSlideRequest, downloadMediaBuffer } from './mediaDownloader';
@@ -136,20 +137,31 @@ class BotManager {
   private configFile: string;
 
   constructor() {
-    this.authDir = path.join(process.cwd(), 'sessions', 'baileys_auth');
-    this.configFile = path.join(process.cwd(), 'sessions', 'bot_config.json');
-    if (!fs.existsSync(this.authDir)) {
-      fs.mkdirSync(this.authDir, { recursive: true });
-    }
+    try {
+      const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+      const baseDir = isServerless ? os.tmpdir() : process.cwd();
+      this.authDir = path.join(baseDir, 'sessions', 'baileys_auth');
+      this.configFile = path.join(baseDir, 'sessions', 'bot_config.json');
 
-    this.loadConfig();
+      if (!fs.existsSync(this.authDir)) {
+        fs.mkdirSync(this.authDir, { recursive: true });
+      }
 
-    // Auto-reconnect if session credentials exist
-    const credsPath = path.join(this.authDir, 'creds.json');
-    if (fs.existsSync(credsPath)) {
-      setTimeout(() => {
-        this.startBot().catch((e) => console.error('Auto-start Baileys error:', e));
-      }, 500);
+      this.loadConfig();
+
+      // Auto-reconnect if session credentials exist and not in serverless
+      if (!isServerless) {
+        const credsPath = path.join(this.authDir, 'creds.json');
+        if (fs.existsSync(credsPath)) {
+          setTimeout(() => {
+            this.startBot().catch((e) => console.error('Auto-start Baileys error:', e));
+          }, 500);
+        }
+      }
+    } catch (err) {
+      console.warn('[BotManager] Safe serverless fallback for sessions:', err);
+      this.authDir = path.join(os.tmpdir(), 'sessions', 'baileys_auth');
+      this.configFile = path.join(os.tmpdir(), 'sessions', 'bot_config.json');
     }
   }
 
@@ -161,13 +173,13 @@ class BotManager {
         if (data.rateLimit) this.rateLimit = data.rateLimit;
       }
     } catch (e) {
-      console.error('Error loading config:', e);
+      console.warn('Error loading config:', e);
     }
   }
 
   private saveConfig() {
     try {
-      const sessDir = path.join(process.cwd(), 'sessions');
+      const sessDir = path.dirname(this.configFile);
       if (!fs.existsSync(sessDir)) {
         fs.mkdirSync(sessDir, { recursive: true });
       }
@@ -183,7 +195,7 @@ class BotManager {
         )
       );
     } catch (e) {
-      console.error('Error saving config:', e);
+      console.warn('Warning saving config:', e);
     }
   }
 
