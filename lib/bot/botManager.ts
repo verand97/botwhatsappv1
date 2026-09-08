@@ -1,4 +1,5 @@
 import makeWASocket, {
+  Browsers,
   DisconnectReason,
   useMultiFileAuthState as initMultiFileAuthState,
   WASocket,
@@ -281,18 +282,30 @@ class BotManager {
       throw new Error('Nomor WhatsApp harus menyertakan kode negara (contoh: 6281234567890)');
     }
 
-    if (!this.sock || this.status !== 'connecting') {
+    // Jika belum ada socket atau status terputus, mulai bot
+    if (!this.sock) {
       await this.startBot();
     }
 
+    // Tunggu socket siap
+    let retries = 0;
+    while ((!this.sock || !this.sock.authState?.creds) && retries < 20) {
+      await new Promise((r) => setTimeout(r, 400));
+      retries++;
+    }
+
     if (this.sock && !this.sock.authState?.creds?.registered) {
-      await new Promise((r) => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 1500));
       const code = await this.sock.requestPairingCode(cleanPhone);
       const formatted = code?.match(/.{1,4}/g)?.join('-') || code;
       return formatted;
     }
 
-    throw new Error('Perangkat sudah terhubung atau socket belum siap');
+    if (this.sock?.authState?.creds?.registered) {
+      throw new Error('Perangkat WhatsApp sudah terdaftar / terhubung!');
+    }
+
+    throw new Error('Soket Baileys belum siap, silakan coba beberapa saat lagi.');
   }
 
   // Start real Baileys connection
@@ -310,13 +323,28 @@ class BotManager {
     this.qrDataUrl = null;
 
     try {
+      // Bersihkan sesi gantung yang belum pernah terhubung/terdaftar
+      const credsPath = path.join(this.authDir, 'creds.json');
+      if (fs.existsSync(credsPath)) {
+        try {
+          const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+          if (!creds.registered) {
+            fs.rmSync(this.authDir, { recursive: true, force: true });
+            fs.mkdirSync(this.authDir, { recursive: true });
+          }
+        } catch {
+          fs.rmSync(this.authDir, { recursive: true, force: true });
+          fs.mkdirSync(this.authDir, { recursive: true });
+        }
+      }
+
       const { state, saveCreds } = await initMultiFileAuthState(this.authDir);
 
       this.sock = makeWASocket({
         auth: state,
         printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
-        browser: ['Verand Control Room', 'Chrome', '120.0.0'],
+        browser: Browsers.ubuntu('Chrome'),
       });
 
       this.sock.ev.on('creds.update', saveCreds);
@@ -329,6 +357,15 @@ class BotManager {
           this.qrRaw = qr;
           try {
             this.qrDataUrl = await QRCode.toDataURL(qr, { margin: 1, scale: 8 });
+            // Cetak QR Code di terminal untuk scan kamera WhatsApp HP secara langsung
+            const terminalQr = await QRCode.toString(qr, { type: 'terminal', small: true });
+            console.log('\n╔══════════════════════════════════════════════════════════════╗');
+            console.log('║       SCAN QR CODE BERIKUT DENGAN WHATSAPP HP ANDA:          ║');
+            console.log('║  (Buka WA di HP > Titik Tiga / Pengaturan > Perangkat        ║');
+            console.log('║   Tertaut > Tautkan Perangkat > Arahkan Kamera ke Layar)     ║');
+            console.log('╚══════════════════════════════════════════════════════════════╝\n');
+            console.log(terminalQr);
+            console.log('⏳ Menunggu scan WhatsApp dari kamera HP...\n');
           } catch (e) {
             console.error('Failed to generate QR DataURL:', e);
           }
@@ -352,9 +389,17 @@ class BotManager {
           this.nomorWa = masked;
           this.pushName = this.sock?.user?.name || 'Verand Bot';
 
+          console.log('\n🎉 ==============================================================');
+          console.log(`✅ BERHASIL TERHUBUNG KE WHATSAPP: ${cleanNum} (${this.pushName})`);
+          console.log('🚀 Status: ONLINE 🟢');
+          console.log('💡 Semua fitur aktif: /menu, /dl, /sticker, /tomedia, /ai');
+          console.log('🌐 Tersinkronisasi dengan Database Supabase & Dashboard Vercel');
+          console.log('==============================================================\n');
+
           dbSaveBotInstance({
             id: 'inst-core',
             nomor_wa: masked,
+            push_name: this.pushName,
             status: 'connected',
             connected_at: this.connectedAt,
           }).catch(() => {});
@@ -420,7 +465,27 @@ class BotManager {
         if (type !== 'notify') return;
 
         for (const msg of messages) {
-          if (!msg.message || msg.key.fromMe) continue;
+          if (!msg.message) continue;
+          if (msg.key.remoteJid === 'status@broadcast') continue;
+
+          const text =
+            msg.message?.conversation ||
+            msg.message?.extendedTextMessage?.text ||
+            msg.message?.imageMessage?.caption ||
+            msg.message?.videoMessage?.caption ||
+            '';
+          const trimmed = text.trim();
+          const isCmd =
+            trimmed.startsWith('/') ||
+            trimmed.startsWith('!') ||
+            trimmed.startsWith('.') ||
+            trimmed.toLowerCase() === 'menu' ||
+            trimmed.toLowerCase() === 'help' ||
+            trimmed.toLowerCase() === 'faq';
+
+          // Abaikan pesan biasa yang dikirim oleh diri sendiri, KECUALI jika itu perintah bot
+          if (msg.key.fromMe && !isCmd) continue;
+
           await this.handleIncomingMessage(msg);
         }
       });
@@ -439,7 +504,7 @@ class BotManager {
     if (!this.sock || !msg || !msg.key) return;
 
     const remoteJid = msg.key.remoteJid;
-    if (!remoteJid) return;
+    if (!remoteJid || remoteJid === 'status@broadcast') return;
 
     const senderRaw = remoteJid.split('@')[0];
     const maskedSender =
