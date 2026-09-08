@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { botManager } from '@/lib/bot/botManager';
+import { dbSaveFeatureConfigs, dbGetActivityLogs } from '@/lib/supabase/client';
 
 export const dynamic = 'force-dynamic';
 // Updated menu & downloader v1.2
@@ -7,7 +8,13 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     const status = botManager.getStatus();
-    const logs = botManager.getLogs();
+    let logs = botManager.getLogs();
+    if (logs.length === 0) {
+      const dbLogs = await dbGetActivityLogs(50);
+      if (dbLogs && dbLogs.length > 0) {
+        logs = dbLogs;
+      }
+    }
     const features = botManager.getFeatures();
     const rateLimit = botManager.getRateLimit();
 
@@ -48,12 +55,14 @@ export async function POST(req: Request) {
       case 'toggleFeature': {
         const { featureId } = payload;
         const features = botManager.toggleFeature(featureId);
+        dbSaveFeatureConfigs(features).catch(() => {});
         return NextResponse.json({ success: true, data: { features } });
       }
 
       case 'updateFeature': {
         const { featureId, updates } = payload;
         const features = botManager.updateFeature(featureId, updates);
+        dbSaveFeatureConfigs(features).catch(() => {});
         return NextResponse.json({ success: true, data: { features } });
       }
 

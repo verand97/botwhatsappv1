@@ -14,6 +14,7 @@ import { addExifToWebp } from './exif';
 import { downloadMediaFromUrl, parseSlideRequest, downloadMediaBuffer } from './mediaDownloader';
 import { generateMenuText, generateFaqText } from './menuHelper';
 import { ActivityLog, FeatureConfig, RateLimitConfig, BotConnectionStatus } from '../types';
+import { dbInsertActivityLog, dbSaveBotInstance } from '../supabase/client';
 
 // Default initial features
 const DEFAULT_FEATURES: FeatureConfig[] = [
@@ -258,6 +259,7 @@ class BotManager {
       created_at: new Date().toISOString(),
     };
     this.logs = [log, ...this.logs.slice(0, 99)];
+    dbInsertActivityLog(log).catch(() => {});
   }
 
   // Start real Baileys connection
@@ -317,6 +319,13 @@ class BotManager {
           this.nomorWa = masked;
           this.pushName = this.sock?.user?.name || 'Verand Bot';
 
+          dbSaveBotInstance({
+            id: 'inst-core',
+            nomor_wa: masked,
+            status: 'connected',
+            connected_at: this.connectedAt,
+          }).catch(() => {});
+
           this.addLog({
             feature_key: 'system',
             feature_name: 'Koneksi Baileys',
@@ -338,6 +347,11 @@ class BotManager {
           this.connectedAt = null;
           this.qrRaw = null;
           this.qrDataUrl = null;
+
+          dbSaveBotInstance({
+            id: 'inst-core',
+            status: 'disconnected',
+          }).catch(() => {});
 
           if (isLoggedOut) {
             try {
