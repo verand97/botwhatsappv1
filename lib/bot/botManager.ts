@@ -366,6 +366,14 @@ class BotManager {
             console.log('╚══════════════════════════════════════════════════════════════╝\n');
             console.log(terminalQr);
             console.log('⏳ Menunggu scan WhatsApp dari kamera HP...\n');
+
+            // Sinkronkan ke Supabase Database agar Vercel Dashboard langsung menampilkan QR Code secara live!
+            dbSaveBotInstance({
+              id: 'inst-core',
+              status: 'disconnected',
+              qr_raw: this.qrRaw,
+              qr_data_url: this.qrDataUrl,
+            }).catch(() => {});
           } catch (e) {
             console.error('Failed to generate QR DataURL:', e);
           }
@@ -402,6 +410,8 @@ class BotManager {
             push_name: this.pushName,
             status: 'connected',
             connected_at: this.connectedAt,
+            qr_raw: null,
+            qr_data_url: null,
           }).catch(() => {});
 
           this.addLog({
@@ -429,6 +439,8 @@ class BotManager {
           dbSaveBotInstance({
             id: 'inst-core',
             status: 'disconnected',
+            qr_raw: null,
+            qr_data_url: null,
           }).catch(() => {});
 
           if (isLoggedOut) {

@@ -9,6 +9,8 @@ export interface BotInstance {
   battery_level?: number;
   push_name?: string;
   uptime_seconds: number;
+  qr_raw?: string | null;
+  qr_data_url?: string | null;
 }
 
 export type FeatureCategory = 'core' | 'media' | 'utility' | 'ai_fun';

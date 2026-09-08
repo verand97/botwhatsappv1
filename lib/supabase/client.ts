@@ -54,14 +54,20 @@ export async function dbSaveBotInstance(bot: Partial<BotInstance>) {
   if (!supabase) return null;
 
   try {
+    const sessionData: Record<string, unknown> = {};
+    if (bot.session_name) sessionData.session_name = bot.session_name;
+    if (bot.qr_raw !== undefined) sessionData.qr_raw = bot.qr_raw;
+    if (bot.qr_data_url !== undefined) sessionData.qr_data_url = bot.qr_data_url;
+
     const { data, error } = await supabase
       .from('bot_instances')
       .upsert(
         {
           id: bot.id || 'inst-core',
           nomor_wa: bot.nomor_wa,
+          push_name: bot.push_name,
           status: bot.status || 'disconnected',
-          session_data: bot.session_name ? { session_name: bot.session_name } : null,
+          session_data: Object.keys(sessionData).length > 0 ? sessionData : null,
           created_at: bot.connected_at || new Date().toISOString(),
         },
         { onConflict: 'id' }
@@ -99,6 +105,8 @@ export async function dbGetBotInstance(id: string = 'inst-core'): Promise<Partia
       status: data.status || 'disconnected',
       connected_at: data.created_at || undefined,
       session_name: data.session_data?.session_name || 'inst-core',
+      qr_raw: data.session_data?.qr_raw || null,
+      qr_data_url: data.session_data?.qr_data_url || null,
       uptime_seconds: 0,
     };
   } catch (err) {

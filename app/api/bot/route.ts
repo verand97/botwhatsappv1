@@ -37,6 +37,10 @@ export async function GET() {
       nomorWa = dbBot.nomor_wa || null;
       pushName = dbBot.push_name || pushName;
       connectedAt = dbBot.connected_at || null;
+      if (botStatus !== 'connected') {
+        qrRaw = dbBot.qr_raw || null;
+        qrDataUrl = dbBot.qr_data_url || null;
+      }
     }
 
     // 2. Jika di lokal dan botManager aktif, ambil data live memori
