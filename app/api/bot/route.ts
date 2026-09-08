@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { botManager } from '@/lib/bot/botManager';
 
 export const dynamic = 'force-dynamic';
+// Updated menu & downloader v1.2
 
 export async function GET() {
   try {

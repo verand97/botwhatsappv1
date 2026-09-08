@@ -954,6 +954,19 @@ const globalForBot = globalThis as unknown as {
   whatsappBotManager?: BotManager;
 };
 
+if (globalForBot.whatsappBotManager) {
+  // Hot-patch existing live instance with newly compiled prototype and methods
+  // so live WhatsApp socket immediately executes updated code without needing reconnect
+  Object.setPrototypeOf(globalForBot.whatsappBotManager, BotManager.prototype);
+  const target = globalForBot.whatsappBotManager as unknown as Record<string, unknown>;
+  const source = BotManager.prototype as unknown as Record<string, unknown>;
+  for (const name of Object.getOwnPropertyNames(BotManager.prototype)) {
+    if (name !== 'constructor') {
+      target[name] = source[name];
+    }
+  }
+}
+
 export const botManager = globalForBot.whatsappBotManager || new BotManager();
 
 if (process.env.NODE_ENV !== 'production') {
