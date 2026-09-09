@@ -143,8 +143,7 @@ class BotManager {
 
   constructor() {
     try {
-      const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-      const baseDir = isServerless ? os.tmpdir() : process.cwd();
+      const baseDir = process.cwd();
       this.authDir = path.join(baseDir, 'sessions', 'baileys_auth');
       this.configFile = path.join(baseDir, 'sessions', 'bot_config.json');
 
@@ -158,9 +157,9 @@ class BotManager {
       // dan API routes tidak membuka soket ganda/merusak sesi WhatsApp.
       // Soket Baileys hanya dijalankan secara eksplisit oleh dedicated worker process.
     } catch (err) {
-      console.warn('[BotManager] Safe serverless fallback for sessions:', err);
-      this.authDir = path.join(os.tmpdir(), 'sessions', 'baileys_auth');
-      this.configFile = path.join(os.tmpdir(), 'sessions', 'bot_config.json');
+      console.warn('[BotManager] Error initializing local sessions:', err);
+      this.authDir = path.join(process.cwd(), 'sessions', 'baileys_auth');
+      this.configFile = path.join(process.cwd(), 'sessions', 'bot_config.json');
     }
   }
 
@@ -471,7 +470,7 @@ class BotManager {
             console.log(terminalQr);
             console.log('⏳ Menunggu scan WhatsApp dari kamera HP...\n');
 
-            // Sinkronkan ke Supabase Database agar Vercel Dashboard langsung menampilkan QR Code secara live!
+            // Sinkronkan ke Supabase Database agar Dashboard langsung menampilkan QR Code secara live!
             dbSaveBotInstance({
               id: 'inst-core',
               status: 'disconnected',
@@ -509,7 +508,7 @@ class BotManager {
           console.log(`✅ BERHASIL TERHUBUNG KE WHATSAPP: ${cleanNum} (${this.pushName})`);
           console.log('🚀 Status: ONLINE 🟢');
           console.log('💡 Semua fitur aktif: /menu, /dl, /sticker, /tomedia, /ai');
-          console.log('🌐 Tersinkronisasi dengan Database Supabase & Dashboard Vercel');
+          console.log('🌐 Tersinkronisasi dengan Database Supabase & Dashboard');
           console.log('==============================================================\n');
 
           dbSaveBotInstance({

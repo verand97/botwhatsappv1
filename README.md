@@ -1,34 +1,112 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Verand.Bot — Asisten Robot WhatsApp Multifungsi (Local Edition)
 
-## Getting Started
+Pusat kontrol dan otomatisasi bot WhatsApp modern berbasis **Next.js**, **Baileys**, dan **Tailwind CSS**. Proyek ini dirancang untuk berjalan **sepenuhnya di perangkat lokal (PC / Laptop Windows Anda)** secara cepat, mandiri, dan stabil.
 
-First, run the development server:
+---
+
+## 🌟 Fitur Utama
+
+- 🟢 **Koneksi WhatsApp Resmi**: Terhubung via QR Code scan langsung di web dashboard atau kode pairing 8 digit.
+- 🎨 **Stiker Maker Instan**: Buat stiker statis (`/sticker` / `/s`) dan stiker animasi dari video/GIF otomatis dengan metadata custom.
+- 🔄 **Stiker to Media**: Konversi stiker WhatsApp kembali menjadi gambar PNG jernih (`/tomedia`).
+- 📥 **All-in-One Media Downloader**: Unduh video, gambar carousel/slide, dan audio dari TikTok, Instagram, YouTube, Facebook, Twitter/X (`/dl <link>`).
+- 🤖 **Asisten Cerdas AI**: Tanya jawab cerdas berbasis AI Gemini (`/ai <pertanyaan>`).
+- 🎛️ **Pusat Kontrol Dashboard**: Pantau status koneksi, kelola toggle fitur secara on/off, atur limit pesan per menit, dan pantau log aktivitas live di `http://localhost:3000`.
+
+---
+
+## 🛠️ Prasyarat Sistem
+
+1. **Node.js**: Versi 20.x atau lebih baru.
+2. **Koneksi Internet**: Untuk sinkronisasi Baileys ke server WhatsApp.
+3. **Akun Supabase (Opsional tapi disarankan)**: Untuk sinkronisasi realtime status bot dan log aktivitas ke antarmuka web.
+
+---
+
+## 🚀 Cara Menjalankan di Perangkat Lokal
+
+### 1. Jalankan Sekaligus (Dashboard + Bot WhatsApp) — *Direkomendasikan*
+
+Cukup buka satu terminal di folder proyek ini, lalu jalankan:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run dev:all
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Perintah ini akan menyalakan:
+- 🌐 **Dashboard Web**: [http://localhost:3000](http://localhost:3000)
+- 🤖 **Worker WhatsApp Baileys**: Menangani pesan masuk, perintah, dan koneksi socket.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-## Learn More
+### 2. Jalankan Secara Terpisah (Dua Terminal)
 
-To learn more about Next.js, take a look at the following resources:
+Jika Anda lebih suka memantau log dashboard dan bot di jendela terpisah:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+**Terminal 1 (Dashboard Next.js):**
+```bash
+npm run dev
+```
+Buka browser Anda di `http://localhost:3000`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**Terminal 2 (Bot Worker WhatsApp):**
+```bash
+npm run worker
+```
 
-## Deploy on Vercel
+---
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 📱 Menghubungkan Perangkat WhatsApp
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Ada 2 cara praktis untuk menautkan nomor WhatsApp Anda:
+
+1. **Scan QR Code di Web Dashboard**:
+   - Buka `http://localhost:3000/koneksi`.
+   - Buka WhatsApp di HP Anda > **Titik Tiga / Pengaturan** > **Perangkat Tertaut** > **Tautkan Perangkat**.
+   - Arahkan kamera HP ke QR Code yang muncul di layar.
+
+2. **Gunakan Pairing Code 8 Digit (Tanpa Kamera)**:
+   - Jalankan worker dengan menyertakan nomor HP Anda (format internasional tanpa tanda +, contoh `62851xxxx`):
+     ```bash
+     npm run worker -- 6285196092326
+     ```
+   - Masukkan kode 8 digit yang muncul di terminal atau dashboard ke WhatsApp HP Anda (**Tautkan dengan nomor telepon saja**).
+
+---
+
+## 🔄 Reset Sesi WhatsApp
+
+Jika Anda ingin mengganti nomor WhatsApp atau menghapus sesi login yang tersimpan:
+
+```bash
+npm run worker:reset
+```
+
+Perintah ini akan membersihkan direktori `sessions/baileys_auth` dan menyiapkan bot untuk scan/pairing baru.
+
+---
+
+## 📁 Struktur Direktori Penting
+
+```
+botwav1/
+├── app/                  # Halaman Web Next.js (Dashboard, Koneksi, Fitur, Log, Pengaturan)
+├── components/           # Komponen UI dashboard & kontrol panel
+├── lib/
+│   ├── bot/              # Logika bot Baileys (botManager.ts, handler pesan, stiker, downloader)
+│   ├── supabase/         # Koneksi database realtime (client.ts)
+│   └── constants.ts      # Konfigurasi default fitur & limitasi
+├── scripts/
+│   ├── run-worker.ts     # Runner proses bot WhatsApp lokal
+│   └── test-db-connection.js # Uji koneksi database Supabase
+├── sessions/             # Kredensial sesi WhatsApp lokal (otomatis dibuat & aman di PC Anda)
+└── package.json
+```
+
+---
+
+## 🛡️ Keamanan & Privasi
+
+- Sesi WhatsApp Anda disimpan secara lokal di folder `sessions/baileys_auth/` di komputer Anda.
+- Sesi ini tidak pernah diunggah ke pihak ketiga dan sudah ditambahkan ke `.gitignore`.
+- Jangan bagikan isi folder `sessions/` kepada siapapun.

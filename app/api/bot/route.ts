@@ -10,13 +10,13 @@ import { DEFAULT_FEATURES, DEFAULT_RATE_LIMIT } from '@/lib/constants';
 
 export const dynamic = 'force-dynamic';
 
-// Lazy loader untuk botManager (agar tidak mengimpor native binary C++ seperti sharp/baileys di serverless Vercel)
+// Loader untuk botManager instance
 async function getLazyBotManager() {
   try {
     const mod = await import('@/lib/bot/botManager');
     return mod.botManager;
   } catch (err) {
-    console.warn('[API/Bot] Lazy import botManager skipped on serverless:', err);
+    console.warn('[API/Bot] Lazy import botManager error:', err);
     return null;
   }
 }
@@ -199,14 +199,14 @@ export async function POST(req: Request) {
           }
         }
 
-        // 2. Jika di website (Vercel / Northflank web service), kirim permintaan ke Worker via Supabase
+        // 2. Kirim permintaan pairing code ke Worker via Supabase
         await dbSaveBotInstance({
           id: 'inst-core',
           pairing_code: null,
           pairing_requested_phone: cleanPhone,
         });
 
-        // Tunggu hingga worker di Northflank menerbitkan pairing code (polling maks 12 detik)
+        // Tunggu hingga worker menerbitkan pairing code (polling maks 12 detik)
         for (let i = 0; i < 24; i++) {
           await new Promise((r) => setTimeout(r, 500));
           const current = await dbGetBotInstance('inst-core');
@@ -217,7 +217,7 @@ export async function POST(req: Request) {
 
         return NextResponse.json({
           success: false,
-          error: 'Worker WhatsApp di Northflank sedang memulai atau offline. Pastikan worker service di Northflank aktif.',
+          error: 'Worker WhatsApp sedang offline atau belum berjalan. Pastikan worker dijalankan dengan perintah "npm run worker" di terminal Anda.',
         }, { status: 504 });
       }
 

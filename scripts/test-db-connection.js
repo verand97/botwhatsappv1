@@ -44,10 +44,10 @@ async function testConnection() {
 
   if (!supabaseUrl || !supabaseKey) {
     console.log('⚠️ Variabel lingkungan Supabase belum diatur di sistem lokal.');
-    console.log('Pastikan variabel berikut telah diisi di Vercel atau file .env.local:');
+    console.log('Pastikan variabel berikut telah diisi di file .env.local:');
     console.log(' • NEXT_PUBLIC_SUPABASE_URL');
     console.log(' • NEXT_PUBLIC_SUPABASE_ANON_KEY');
-    console.log('\nPetunjuk: Baca panduan lengkap di VERCEL_DEPLOYMENT_GUIDE.md');
+    console.log('\nPetunjuk: Periksa kredensial Supabase Anda di file .env.local');
     return;
   }
 
@@ -81,7 +81,7 @@ async function testConnection() {
       console.log('✅ Tabel activity_logs terhubung!');
     }
 
-    console.log('\n🎉 SEMUA KONEKSI DATABASE VALID & SIAP DIGUNAKAN DI VERCEL!');
+    console.log('\n🎉 SEMUA KONEKSI DATABASE VALID & SIAP DIGUNAKAN SECARA LOKAL!');
   } catch (e) {
     console.error('❌ Terjadi kesalahan saat menguji koneksi:', e.message);
   }

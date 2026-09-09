@@ -30,14 +30,13 @@
 | Database & Auth                                  | **Supabase** (Postgres + Auth + Realtime + Storage)                                               | Simpan sesi bot, konfigurasi fitur per pengguna, log pesan, dan file media (stiker/gambar)                                                                                                                                                                    |
 | Konversi gambar↔stiker                           | **`sharp`** (resize/convert) + **`node-webpmux`** (inject metadata EXIF pack/author ke file WebP) | Kombinasi standar untuk bikin stiker WA yang valid dengan nama pack custom                                                                                                                                                                                    |
 | Konversi video pendek→stiker animasi             | **`ffmpeg`** (via `fluent-ffmpeg`) untuk convert ke WebP animasi                                  | Untuk stiker bergerak                                                                                                                                                                                                                                         |
-| Realtime status bot (QR, connected/disconnected) | **Supabase Realtime** atau **WebSocket langsung** dari worker ke dashboard                        | Dashboard perlu update status koneksi bot secara live tanpa refresh                                                                                                                                                                                           |
-| Deploy dashboard                                 | Vercel                                                                                            |                                                                                                                                                                                                                                                               |
-| Deploy bot worker                                | VPS kecil / Railway / Fly.io (butuh proses yang jalan 24/7, bukan serverless)                     |                                                                                                                                                                                                                                                               |
+| Deploy dashboard                                 | Lokal (PC / Perangkat Windows via http://localhost:3000)                                          |                                                                                                                                                                                                                                                               |
+| Deploy bot worker                                | Lokal (Node.js worker di perangkat Anda)                                                          |                                                                                                                                                                                                                                                               |
 
 ### Arsitektur Sistem
 
 ```
-[Dashboard Next.js] ──login──► [Supabase Auth]
+[Dashboard Next.js] ──login──► [Supabase Auth / Local Config]
         │
         │ kelola & pantau
         ▼
@@ -47,7 +46,7 @@
         └──────────► [Supabase: sesi, config, log, media]
 ```
 
-**Kenapa dipisah dashboard & worker:** ini beda dari proyek-proyek sebelumnya — bot WA butuh proses yang menyala terus (koneksi socket persisten), sedangkan Next.js di Vercel bersifat serverless (mati setelah request selesai). Dashboard hanya mengatur konfigurasi & menampilkan status; proses bot sesungguhnya berjalan independen di server terpisah yang selalu hidup.
+**Kenapa dipisah dashboard & worker:** bot WA butuh proses yang menyala terus (koneksi socket persisten Baileys), sedangkan Next.js menangani UI web dashboard. Di perangkat lokal Anda, dashboard dan worker dapat dijalankan bersamaan dengan mudah melalui satu perintah (`npm run dev:all`) atau di dua terminal terpisah (`npm run dev` dan `npm run worker`).
 
 ---
 
@@ -279,7 +278,7 @@ create table rate_limit_state (
 
 ## 10. Catatan untuk AI Coding Assistant
 
-- **Bot worker (Baileys) harus di-develop & di-deploy terpisah dari dashboard Next.js** — jangan coba jalankan koneksi socket persisten di dalam API route Vercel, ini akan gagal karena sifat serverless yang mati setelah request selesai.
+- **Bot worker (Baileys) dijalankan terpisah dari Next.js** — gunakan proses Node.js terpisah (`npm run worker`) atau jalankan serentak (`npm run dev:all`) agar koneksi Baileys tetap persisten dan stabil di perangkat Anda.
 - Mulai dari §7 (skema data) dan koneksi QR dasar sebelum menyentuh fitur stiker — pastikan siklus connect/disconnect/reconnect bot stabil dulu, karena ini fondasi semua fitur lain.
 - Implementasi Stiker Maker: uji dengan berbagai rasio gambar (portrait/landscape) untuk pastikan crop/resize ke 512x512 tidak merusak komposisi gambar penting.
 - Terapkan rate limiter (§8) sejak Fase 1, jangan ditunda ke akhir — ini bagian fundamental yang melindungi pengguna dari resiko banned, bukan fitur tambahan opsional.

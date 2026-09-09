@@ -120,7 +120,7 @@ async function main() {
     console.log('   • /tomedia          : Ubah Stiker ke Gambar PNG');
     console.log('   • /ai <teks>        : Asisten AI Gemini');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('🌐 Tersinkronisasi dengan Database Supabase & Dashboard Vercel.');
+    console.log('🌐 Tersinkronisasi dengan Database Supabase & Dashboard Lokal.');
     console.log('💡 Anda dapat mengirim pesan dari HP sendiri (chat diri sendiri) ataupun nomor lain!');
     console.log('💡 Tekan Ctrl + C jika ingin menghentikan worker.\n');
   } catch (err) {

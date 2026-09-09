@@ -1,10 +1,9 @@
 -- ==============================================================================
--- VERAND.BOT — DATABASE SCHEMA (PostgreSQL / Supabase / Vercel Postgres / Neon)
+-- VERAND.BOT — DATABASE SCHEMA (PostgreSQL / Supabase / Neon)
 -- ==============================================================================
 -- Jalankan skrip ini di:
 -- 1. Supabase SQL Editor (https://supabase.com/dashboard/project/_/sql), ATAU
--- 2. Vercel Dashboard -> Storage -> Postgres -> Query Console, ATAU
--- 3. Neon Console (https://console.neon.tech/)
+-- 2. Neon Console (https://console.neon.tech/)
 -- ==============================================================================
 
 -- 1. Tabel Akun Bot Instance (Koneksi Multi-Device Baileys)

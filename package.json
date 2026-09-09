@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:all": "concurrently -n \"DASHBOARD,BOT_WORKER\" -c \"cyan,green\" \"next dev\" \"tsx scripts/run-worker.ts\"",
     "worker": "tsx scripts/run-worker.ts",
     "worker:reset": "tsx scripts/run-worker.ts --reset",
     "build": "next build",
@@ -40,6 +41,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^10.0.5",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",

@@ -1,6 +1,0 @@
-node_modules
-.next
-.git
-sessions
-*.log
-.env.local
