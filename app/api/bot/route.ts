@@ -53,8 +53,12 @@ export async function GET() {
         pushName = localStatus.push_name || pushName;
         connectedAt = localStatus.connected_at || connectedAt;
       }
-      qrRaw = localStatus.qr_raw;
-      qrDataUrl = localStatus.qr_data_url;
+      if (localStatus.qr_raw) {
+        qrRaw = localStatus.qr_raw;
+      }
+      if (localStatus.qr_data_url) {
+        qrDataUrl = localStatus.qr_data_url;
+      }
     }
 
     // 3. Ambil log aktivitas dari Supabase atau lokal
@@ -130,26 +134,31 @@ export async function POST(req: Request) {
 
     switch (action) {
       case 'start': {
-        if (botManager) {
+        if (botManager && process.env.IS_WORKER === 'true') {
           const result = await botManager.startBot();
           return NextResponse.json({ success: true, data: result });
         }
+        const currentBot = await dbGetBotInstance('inst-core');
         return NextResponse.json({
           success: true,
           data: {
-            status: 'connecting',
-            message: 'Silakan jalankan "node scripts/pair-whatsapp.js" untuk menautkan perangkat nyata.',
+            status: currentBot?.status || 'disconnected',
+            qr_raw: currentBot?.qr_raw || null,
+            qr_data_url: currentBot?.qr_data_url || null,
+            message: 'Worker WhatsApp Baileys berjalan terpisah. Jalankan "npm run worker" di terminal atau server.',
           },
         });
       }
 
       case 'disconnect': {
-        if (botManager) {
+        if (botManager && process.env.IS_WORKER === 'true') {
           await botManager.disconnect();
         }
         await dbSaveBotInstance({
           id: 'inst-core',
           status: 'disconnected',
+          qr_raw: null,
+          qr_data_url: null,
         });
         return NextResponse.json({ success: true, data: { status: 'disconnected' } });
       }
@@ -171,7 +180,7 @@ export async function POST(req: Request) {
 
       case 'getPairingCode': {
         const { phoneNumber } = payload || {};
-        if (botManager) {
+        if (botManager && process.env.IS_WORKER === 'true') {
           try {
             const code = await botManager.getPairingCode(phoneNumber);
             return NextResponse.json({ success: true, data: { code } });
@@ -182,7 +191,7 @@ export async function POST(req: Request) {
         }
         return NextResponse.json({
           success: false,
-          error: 'Soket Baileys harus aktif di terminal/VPS. Jalankan: node scripts/pair-whatsapp.js ' + (phoneNumber || ''),
+          error: 'Untuk keamanan sesi multi-device, minta pairing code via worker terminal: npm run worker -- ' + (phoneNumber || ''),
         }, { status: 400 });
       }
 

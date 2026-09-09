@@ -33,23 +33,6 @@ export default function QrConnectPanel() {
     return () => clearInterval(interval);
   }, [botInstance.status]);
 
-  const handleSimulateSuccess = () => {
-    setConnecting();
-    setTimeout(() => {
-      simulateConnect('+62812-***-7890');
-      // Trigger festive celebration confetti (§3.4)
-      try {
-        confetti({
-          particleCount: 80,
-          spread: 70,
-          origin: { y: 0.6 },
-          colors: ['#3ECF8E', '#4C8FE0', '#DDA24C', '#ffffff'],
-        });
-      } catch {
-        // Confetti fallback
-      }
-    }, 800);
-  };
 
   const handleGeneratePairingCode = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,12 +56,13 @@ export default function QrConnectPanel() {
         setPairingCodeGenerated(data.data.code);
       } else {
         setPairingNotice(
-          `Soket WhatsApp resmi memerlukan worker Baileys yang berjalan persisten. Jalankan perintah di terminal Anda:\nnode scripts/pair-whatsapp.js ${cleanNum}`
+          data.error ||
+            `Soket WhatsApp resmi memerlukan worker Baileys yang berjalan persisten. Jalankan perintah di terminal Anda:\nnpm run worker -- ${cleanNum}`
         );
       }
     } catch {
       setPairingNotice(
-        `Soket WhatsApp resmi memerlukan worker Baileys yang berjalan persisten. Jalankan perintah di terminal Anda:\nnode scripts/pair-whatsapp.js ${cleanNum}`
+        `Soket WhatsApp resmi memerlukan worker Baileys yang berjalan persisten. Jalankan perintah di terminal Anda:\nnpm run worker -- ${cleanNum}`
       );
     } finally {
       setPairingLoading(false);
@@ -261,20 +245,6 @@ export default function QrConnectPanel() {
                   </span>
                 </div>
               )}
-              {botInstance.status !== 'connected' && (
-                <div className="mt-6 flex flex-col items-center gap-2">
-                  <button
-                    onClick={handleSimulateSuccess}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-circuit-500 hover:bg-circuit-400 text-white font-semibold text-xs transition-all shadow-md shadow-circuit-500/25 glow-circuit"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    <span>Simulasi Scan QR Sukses (Satu Klik)</span>
-                  </button>
-                  <span className="text-[11px] text-gray-400">
-                    Gunakan tombol di atas untuk mencoba langsung interaksi tanpa HP fisik.
-                  </span>
-                </div>
-              )}
             </div>
           ) : (
             /* Pairing Code Method Container */
@@ -315,15 +285,6 @@ export default function QrConnectPanel() {
                   <div className="p-2 rounded bg-panel-950 font-mono text-[11px] text-circuit-400 border border-panel-700 select-all">
                     node scripts/pair-whatsapp.js {phoneNumberInput.replace(/\D/g, '') || '6281234567890'}
                   </div>
-                  <div className="pt-1">
-                    <button
-                      type="button"
-                      onClick={handleSimulateSuccess}
-                      className="w-full py-2 rounded-lg bg-live-400/10 hover:bg-live-400/20 text-live-400 border border-live-400/30 font-medium text-xs transition-colors"
-                    >
-                      Uji Tampilan via Simulasi Cepat (1-Klik) &rarr;
-                    </button>
-                  </div>
                 </div>
               )}
 
@@ -336,12 +297,6 @@ export default function QrConnectPanel() {
                   <p className="text-[11px] text-gray-400">
                     Masukkan kode ini di HP: WhatsApp &gt; Perangkat Tertaut &gt; Tautkan dengan nomor telepon.
                   </p>
-                  <button
-                    onClick={handleSimulateSuccess}
-                    className="mt-3 text-xs text-live-400 hover:underline font-medium"
-                  >
-                    Simulasikan Pairing Berhasil &rarr;
-                  </button>
                 </div>
               )}
             </div>

@@ -2,6 +2,7 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   useMultiFileAuthState as initMultiFileAuthState,
+  fetchLatestBaileysVersion,
   WASocket,
   WAMessage,
   downloadMediaMessage,
@@ -16,7 +17,7 @@ import { addExifToWebp } from './exif';
 import { downloadMediaFromUrl, parseSlideRequest, downloadMediaBuffer } from './mediaDownloader';
 import { generateMenuText, generateFaqText } from './menuHelper';
 import { ActivityLog, FeatureConfig, RateLimitConfig, BotConnectionStatus } from '../types';
-import { dbInsertActivityLog, dbSaveBotInstance } from '../supabase/client';
+import { dbInsertActivityLog, dbSaveBotInstance, dbLoadFeatureConfigs } from '../supabase/client';
 
 // Default initial features
 const DEFAULT_FEATURES: FeatureConfig[] = [
@@ -134,6 +135,7 @@ class BotManager {
   private stickersCountToday = 0;
   private mediaDownloadedToday = 0;
   private isConnecting = false;
+  private lastFeatureSync = 0;
   private authDir: string;
   private configFile: string;
 
@@ -150,15 +152,9 @@ class BotManager {
 
       this.loadConfig();
 
-      // Auto-reconnect if session credentials exist and not in serverless
-      if (!isServerless) {
-        const credsPath = path.join(this.authDir, 'creds.json');
-        if (fs.existsSync(credsPath)) {
-          setTimeout(() => {
-            this.startBot().catch((e) => console.error('Auto-start Baileys error:', e));
-          }, 500);
-        }
-      }
+      // Note: Soket Baileys TIDAK boleh dijalankan otomatis di sini agar Next.js dev server
+      // dan API routes tidak membuka soket ganda/merusak sesi WhatsApp.
+      // Soket Baileys hanya dijalankan secara eksplisit oleh dedicated worker process.
     } catch (err) {
       console.warn('[BotManager] Safe serverless fallback for sessions:', err);
       this.authDir = path.join(os.tmpdir(), 'sessions', 'baileys_auth');
@@ -224,6 +220,27 @@ class BotManager {
     return this.features;
   }
 
+  public async syncFeaturesFromDb() {
+    try {
+      const dbFeatures = await dbLoadFeatureConfigs();
+      if (dbFeatures && dbFeatures.length > 0) {
+        this.features = this.features.map((f) => {
+          const match = dbFeatures.find((df) => df.id === f.id || df.feature_key === f.feature_key);
+          return match
+            ? {
+                ...f,
+                is_enabled: match.is_enabled,
+                command_trigger: match.command_trigger || f.command_trigger,
+                extra_settings: match.extra_settings || f.extra_settings,
+              }
+            : f;
+        });
+      }
+    } catch {
+      // Abaikan jika koneksi db bermasalah
+    }
+  }
+
   public getRateLimit(): RateLimitConfig {
     return this.rateLimit;
   }
@@ -282,6 +299,10 @@ class BotManager {
       throw new Error('Nomor WhatsApp harus menyertakan kode negara (contoh: 6281234567890)');
     }
 
+    if (process.env.IS_WORKER !== 'true') {
+      throw new Error('Pairing code harus diminta melalui worker terminal: npm run worker -- ' + cleanPhone);
+    }
+
     // Jika belum ada socket atau status terputus, mulai bot
     if (!this.sock) {
       await this.startBot();
@@ -309,7 +330,13 @@ class BotManager {
   }
 
   // Start real Baileys connection
-  public async startBot() {
+  public async startBot(targetPhoneNumber?: string) {
+    // Hanya worker process resmi yang diizinkan membuka soket Baileys
+    if (process.env.IS_WORKER !== 'true') {
+      console.warn('[BotManager] startBot() dipanggil di luar Worker process (Next.js server). Melewati pembukaan soket Baileys.');
+      return this.getStatus();
+    }
+
     if (this.sock && this.status === 'connected') {
       return this.getStatus();
     }
@@ -323,36 +350,71 @@ class BotManager {
     this.qrDataUrl = null;
 
     try {
-      // Bersihkan sesi gantung yang belum pernah terhubung/terdaftar
-      const credsPath = path.join(this.authDir, 'creds.json');
-      if (fs.existsSync(credsPath)) {
-        try {
-          const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
-          if (!creds.registered) {
-            fs.rmSync(this.authDir, { recursive: true, force: true });
-            fs.mkdirSync(this.authDir, { recursive: true });
-          }
-        } catch {
-          fs.rmSync(this.authDir, { recursive: true, force: true });
-          fs.mkdirSync(this.authDir, { recursive: true });
-        }
+      if (!fs.existsSync(this.authDir)) {
+        fs.mkdirSync(this.authDir, { recursive: true });
       }
+
+      await this.syncFeaturesFromDb();
 
       const { state, saveCreds } = await initMultiFileAuthState(this.authDir);
 
+      let version: [number, number, number] = [2, 3000, 1043857760];
+      try {
+        const v = await fetchLatestBaileysVersion();
+        if (v && v.version) {
+          version = v.version;
+          console.log(`[Baileys] Memakai WhatsApp Web Protocol: v${version.join('.')} (Latest: ${v.isLatest})`);
+        }
+      } catch (e) {
+        console.warn('[Baileys] Menggunakan fallback versi WhatsApp Web v2.3000:', e);
+      }
+
       this.sock = makeWASocket({
+        version,
         auth: state,
         printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
-        browser: Browsers.ubuntu('Chrome'),
+        browser: Browsers.macOS('Chrome'),
+        syncFullHistory: false,
+        markOnlineOnConnect: false,
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 60000,
+        keepAliveIntervalMs: 25000,
       });
 
       this.sock.ev.on('creds.update', saveCreds);
 
+      // Jika pengguna memilih metode Pairing Code (nomor HP), jangan cetak QR
+      if (targetPhoneNumber && !state.creds.registered) {
+        const cleanPhone = targetPhoneNumber.replace(/\D/g, '');
+        setTimeout(async () => {
+          try {
+            if (this.sock && !this.sock.authState?.creds?.registered) {
+              console.log(`\n⏳ Mengirim permintaan 8-Digit Pairing Code ke WhatsApp untuk: +${cleanPhone}...`);
+              const code = await this.sock.requestPairingCode(cleanPhone);
+              const formatted = code?.match(/.{1,4}/g)?.join('-') || code;
+              console.log('\n╔════════════════════════════════════════════════════════════╗');
+              console.log('║               KODE TAUTAN RESMI WHATSAPP                   ║');
+              console.log('╠════════════════════════════════════════════════════════════╣');
+              console.log(`║                  👉   ${formatted}   👈                  ║`);
+              console.log('╚════════════════════════════════════════════════════════════╝\n');
+              console.log('📋 CARA MENGHUBUNGKAN:');
+              console.log(`   1. Buka WhatsApp di HP Anda (+${cleanPhone})`);
+              console.log('   2. Masuk ke: Titik Tiga (atau Pengaturan) > Perangkat Tertaut');
+              console.log('   3. Ketuk tombol "Tautkan Perangkat"');
+              console.log('   4. Di bawah jendela scan kamera, ketuk "Tautkan dengan nomor telepon saja"');
+              console.log(`   5. Masukkan 8 karakter kode ini: ${formatted}\n`);
+            }
+          } catch (pairErr) {
+            console.error('Gagal meminta pairing code:', pairErr);
+          }
+        }, 2500);
+      }
+
       this.sock.ev.on('connection.update', async (update: { connection?: string; lastDisconnect?: { error?: unknown }; qr?: string }) => {
         const { connection, lastDisconnect, qr } = update;
 
-        if (qr) {
+        if (qr && !targetPhoneNumber) {
           this.isConnecting = false;
           this.qrRaw = qr;
           try {
@@ -535,6 +597,12 @@ class BotManager {
     const cleanText = text.trim();
     const lower = cleanText.toLowerCase();
     const prefix = this.rateLimit.command_prefix || '!';
+
+    // Sync konfigurasi fitur dari Supabase berkala (setiap 15 detik)
+    if (Date.now() - this.lastFeatureSync > 15000) {
+      this.lastFeatureSync = Date.now();
+      await this.syncFeaturesFromDb();
+    }
 
     // 1. Rate Limiter check (§8 Anti-Abuse)
     const now = Date.now();

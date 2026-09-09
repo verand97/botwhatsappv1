@@ -1,8 +1,80 @@
+process.env.IS_WORKER = 'true';
+
 import { botManager } from '../lib/bot/botManager';
 import fs from 'fs';
 import path from 'path';
 
+const lockFilePath = path.join(process.cwd(), 'sessions', 'worker.lock');
+
+function acquireLock(): boolean {
+  const sessionsDir = path.join(process.cwd(), 'sessions');
+  if (!fs.existsSync(sessionsDir)) {
+    fs.mkdirSync(sessionsDir, { recursive: true });
+  }
+
+  if (fs.existsSync(lockFilePath)) {
+    try {
+      const pidStr = fs.readFileSync(lockFilePath, 'utf8').trim();
+      const pid = parseInt(pidStr, 10);
+      if (!isNaN(pid)) {
+        try {
+          process.kill(pid, 0); // Jika tidak throw error, berarti proses masih hidup
+          console.error(`\n⚠️ Worker sudah berjalan di proses lain (PID: ${pid}).`);
+          console.error('WhatsApp hanya mengizinkan 1 koneksi soket aktif.');
+          console.error('Hentikan worker sebelumnya (tekan Ctrl+C di terminal terkait), atau hapus sessions/worker.lock jika worker lama mati mendadak.\n');
+          return false;
+        } catch {
+          // Proses lama sudah mati, bersihkan lock usang
+          console.log(`[Lock] Membersihkan file lock usang (PID ${pid} sudah tidak aktif).`);
+          try {
+            fs.unlinkSync(lockFilePath);
+          } catch {
+            // Ignored
+          }
+        }
+      }
+    } catch {
+      // Ignored
+    }
+  }
+
+  try {
+    fs.writeFileSync(lockFilePath, String(process.pid), 'utf8');
+    return true;
+  } catch (err) {
+    console.error('Gagal membuat file lock:', err);
+    return false;
+  }
+}
+
+function releaseLock() {
+  try {
+    if (fs.existsSync(lockFilePath)) {
+      const pidStr = fs.readFileSync(lockFilePath, 'utf8').trim();
+      if (parseInt(pidStr, 10) === process.pid) {
+        fs.unlinkSync(lockFilePath);
+      }
+    }
+  } catch {
+    // Ignored
+  }
+}
+
+process.on('exit', releaseLock);
+process.on('SIGINT', () => {
+  releaseLock();
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  releaseLock();
+  process.exit(0);
+});
+
 async function main() {
+  if (!acquireLock()) {
+    process.exit(1);
+  }
+
   console.log('=============================================================');
   console.log('🤖 VERAND.BOT — WORKER RESMI 24/7 (ALL FEATURES ACTIVE)');
   console.log('=============================================================');
@@ -27,36 +99,15 @@ async function main() {
   console.log('⏳ Memulai engine Baileys dan menghubungkan ke WhatsApp...\n');
 
   try {
-    const status = await botManager.startBot();
+    await botManager.startBot(phoneNumber);
 
-    if (phoneNumber && status.status !== 'connected') {
-      console.log(`📱 Meminta Pairing Code 8-Digit untuk nomor: +${phoneNumber}...`);
-      try {
-        const code = await botManager.getPairingCode(phoneNumber);
-        console.log('\n╔════════════════════════════════════════════════════════════╗');
-        console.log('║               KODE TAUTAN RESMI WHATSAPP                   ║');
-        console.log('╠════════════════════════════════════════════════════════════╣');
-        console.log(`║                  👉   ${code}   👈                  ║`);
-        console.log('╚════════════════════════════════════════════════════════════╝\n');
-        console.log('📋 CARA MENGHUBUNGKAN:');
-        console.log(`   1. Buka WhatsApp di HP Anda (+${phoneNumber})`);
-        console.log('   2. Masuk ke: Titik Tiga (atau Pengaturan) > Perangkat Tertaut');
-        console.log('   3. Ketuk tombol "Tautkan Perangkat"');
-        console.log('   4. Di bawah jendela scan kamera, ketuk "Tautkan dengan nomor telepon saja"');
-        console.log(`   5. Masukkan 8 karakter kode ini: ${code}\n`);
-        console.log('💡 CARA ALTERNATIF LEBIH CEPAT (1 DETIK):');
-        console.log('   Cukup arahkan kamera WhatsApp Anda ke QR CODE yang muncul di atas!');
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.log('ℹ️ Status pairing:', msg);
-      }
-    } else if (!phoneNumber && status.status !== 'connected') {
+    if (!phoneNumber) {
       console.log('💡 PETUNJUK PENAUTAN PERANGKAT:');
-      console.log('   1. CARA PALING CEPAT (1 DETIK TANPA KETIK KODE):');
-      console.log('      • Arahkan kamera WhatsApp HP Anda ke QR CODE di atas.');
-      console.log('        (Buka WA > Titik Tiga > Perangkat Tertaut > Tautkan Perangkat)\n');
-      console.log('   2. CARA MENGGUNAKAN KODE 8-DIGIT:');
-      console.log('      • Jalankan ulang perintah dengan nomor HP Anda, contoh:');
+      console.log('   1. CARA SCAN QR:');
+      console.log('      • Buka WhatsApp di HP > Titik Tiga > Perangkat Tertaut > Tautkan Perangkat');
+      console.log('      • Arahkan kamera ke QR Code di atas atau di http://localhost:3000/dashboard/koneksi\n');
+      console.log('   2. CARA MENGGUNAKAN 8-DIGIT KODE (BEBAS SCAN KAMERA):');
+      console.log('      • Jalankan perintah dengan nomor HP Anda, contoh:');
       console.log('        npm run worker -- 6285196092326\n');
     }
 
