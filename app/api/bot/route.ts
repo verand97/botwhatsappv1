@@ -180,19 +180,45 @@ export async function POST(req: Request) {
 
       case 'getPairingCode': {
         const { phoneNumber } = payload || {};
+        const cleanPhone = (phoneNumber || '').replace(/\D/g, '');
+        if (!cleanPhone || cleanPhone.length < 9) {
+          return NextResponse.json({
+            success: false,
+            error: 'Nomor WhatsApp tidak valid. Masukkan nomor lengkap dengan kode negara (contoh: 6281234567890)',
+          }, { status: 400 });
+        }
+
+        // 1. Jika botManager berjalan lokal dalam worker process
         if (botManager && process.env.IS_WORKER === 'true') {
           try {
-            const code = await botManager.getPairingCode(phoneNumber);
+            const code = await botManager.getPairingCode(cleanPhone);
             return NextResponse.json({ success: true, data: { code } });
           } catch (err: unknown) {
             const errorMsg = err instanceof Error ? err.message : 'Gagal meminta pairing code';
             return NextResponse.json({ success: false, error: errorMsg }, { status: 400 });
           }
         }
+
+        // 2. Jika di website (Vercel / Northflank web service), kirim permintaan ke Worker via Supabase
+        await dbSaveBotInstance({
+          id: 'inst-core',
+          pairing_code: null,
+          pairing_requested_phone: cleanPhone,
+        });
+
+        // Tunggu hingga worker di Northflank menerbitkan pairing code (polling maks 12 detik)
+        for (let i = 0; i < 24; i++) {
+          await new Promise((r) => setTimeout(r, 500));
+          const current = await dbGetBotInstance('inst-core');
+          if (current?.pairing_code) {
+            return NextResponse.json({ success: true, data: { code: current.pairing_code } });
+          }
+        }
+
         return NextResponse.json({
           success: false,
-          error: 'Untuk keamanan sesi multi-device, minta pairing code via worker terminal: npm run worker -- ' + (phoneNumber || ''),
-        }, { status: 400 });
+          error: 'Worker WhatsApp di Northflank sedang memulai atau offline. Pastikan worker service di Northflank aktif.',
+        }, { status: 504 });
       }
 
       case 'toggleFeature': {

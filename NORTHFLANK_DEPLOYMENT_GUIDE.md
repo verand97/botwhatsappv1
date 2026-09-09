@@ -78,6 +78,8 @@ Gulir ke bagian **Environment variables**, lalu tambahkan kunci-kunci berikut (a
 | `NEXT_PUBLIC_SUPABASE_URL` | `https://rcuvnxdsfsvdzozpvcqq.supabase.co` | URL Supabase Anda |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `eyJhbGciOi...` | Anon Key Supabase |
 | `SUPABASE_SERVICE_ROLE_KEY` | `eyJhbGciOi...` | Service Role Key Supabase |
+| `IS_WORKER` | `true` | Menandai container sebagai dedicated Baileys worker |
+| `GEMINI_API_KEY` | `AIzaSy...` (Opsional) | API Key Google Gemini untuk fitur `/ai` |
 | `NODE_ENV` | `production` | Mode produksi |
 
 ---
@@ -93,24 +95,29 @@ Gulir ke bagian **Environment variables**, lalu tambahkan kunci-kunci berikut (a
 
 ---
 
-## 📱 LANGKAH 5: Menghubungkan Bot ke WhatsApp Anda
+## 📱 LANGKAH 5: Menghubungkan Bot ke WhatsApp Anda (Dari Website)
 
-Setelah service berstatus **Running**, Anda memiliki 2 cara mudah untuk menautkan perangkat:
+Setelah worker di Northflank berstatus **Running 🟢**, buka dashboard website Anda:
+👉 **[https://botwhatsappv1.vercel.app/dashboard/koneksi](https://botwhatsappv1.vercel.app/dashboard/koneksi)**
 
-### Cara 1: Lewat Dashboard Vercel (Paling Mudah)
-1. Buka dashboard Vercel Anda:
-   👉 **[https://botwhatsappv1.vercel.app/dashboard/koneksi](https://botwhatsappv1.vercel.app/dashboard/koneksi)**
-2. Worker di Northflank otomatis mengunggah QR Code ke Supabase, sehingga gambar **QR Code WhatsApp langsung tampil di layar web Vercel Anda**!
-3. Buka WhatsApp di ponsel Anda:
-   - Masuk ke **Titik Tiga / Pengaturan** > **Perangkat Tertaut** > **Tautkan Perangkat**.
-   - Arahkan kamera ponsel Anda ke QR Code di web Vercel.
-4. Selesai! Bot WhatsApp Anda kini **TERHUBUNG & ONLINE 24/7 TANPA PERLU LAPTOP MENYALA**.
+Anda dapat memilih salah satu dari **2 metode penautan yang didukung penuh di website**:
 
-### Cara 2: Lewat Logs Northflank
-1. Di dashboard Northflank, klik service `whatsapp-worker`.
-2. Buka tab **Logs**.
-3. Anda akan melihat gambar QR Code ASCII langsung di log terminal.
-4. Scan gambar tersebut dengan WhatsApp ponsel Anda.
+### Opsi A: Scan QR Code di Website
+1. Di tab **QR Code Resmi**, QR Code yang dihasilkan oleh worker Northflank akan tampil secara otomatis di layar browser.
+2. Buka WhatsApp di HP Anda > **Titik Tiga / Pengaturan** > **Perangkat Tertaut** > **Tautkan Perangkat**.
+3. Arahkan kamera HP ke layar website.
+4. Begitu ter-scan, dashboard website akan langsung berubah status menjadi **ONLINE 🟢**!
+
+### Opsi B: Gunakan 8-Digit Pairing Code (Tanpa Perlu Scan Kamera)
+1. Di website, klik tab **Pairing Code (8-Digit)**.
+2. Masukkan nomor WhatsApp Anda (contoh: `6285196092326`).
+3. Klik tombol **Dapatkan 8-Digit Pairing Code**.
+4. Website akan berkomunikasi dengan worker di Northflank melalui Supabase, lalu menampilkan 8-digit kode resmi (contoh: `64T2-G3XC`) di layar website Anda.
+5. Buka WhatsApp di HP Anda:
+   - Masuk ke **Perangkat Tertaut** > **Tautkan Perangkat**.
+   - Ketuk **"Tautkan dengan nomor telepon saja"**.
+   - Masukkan 8 karakter kode tersebut.
+6. Selesai! Bot langsung tersambung dan aktif 24/7.
 
 ---
 

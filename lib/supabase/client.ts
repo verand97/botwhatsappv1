@@ -54,21 +54,34 @@ export async function dbSaveBotInstance(bot: Partial<BotInstance>) {
   if (!supabase) return null;
 
   try {
-    const sessionData: Record<string, unknown> = {};
-    if (bot.session_name) sessionData.session_name = bot.session_name;
+    // Ambil session_data lama jika ada untuk di-merge
+    let sessionData: Record<string, unknown> = {};
+    const existing = await supabase
+      .from('bot_instances')
+      .select('session_data, nomor_wa, push_name, status, created_at')
+      .eq('id', bot.id || 'inst-core')
+      .maybeSingle();
+
+    if (existing?.data?.session_data && typeof existing.data.session_data === 'object') {
+      sessionData = { ...(existing.data.session_data as Record<string, unknown>) };
+    }
+
+    if (bot.session_name !== undefined) sessionData.session_name = bot.session_name;
     if (bot.qr_raw !== undefined) sessionData.qr_raw = bot.qr_raw;
     if (bot.qr_data_url !== undefined) sessionData.qr_data_url = bot.qr_data_url;
+    if (bot.pairing_requested_phone !== undefined) sessionData.pairing_requested_phone = bot.pairing_requested_phone;
+    if (bot.pairing_code !== undefined) sessionData.pairing_code = bot.pairing_code;
 
     const { data, error } = await supabase
       .from('bot_instances')
       .upsert(
         {
           id: bot.id || 'inst-core',
-          nomor_wa: bot.nomor_wa,
-          push_name: bot.push_name,
-          status: bot.status || 'disconnected',
+          nomor_wa: bot.nomor_wa !== undefined ? bot.nomor_wa : existing?.data?.nomor_wa,
+          push_name: bot.push_name !== undefined ? bot.push_name : existing?.data?.push_name,
+          status: bot.status || existing?.data?.status || 'disconnected',
           session_data: Object.keys(sessionData).length > 0 ? sessionData : null,
-          created_at: bot.connected_at || new Date().toISOString(),
+          created_at: bot.connected_at || existing?.data?.created_at || new Date().toISOString(),
         },
         { onConflict: 'id' }
       )
@@ -107,6 +120,8 @@ export async function dbGetBotInstance(id: string = 'inst-core'): Promise<Partia
       session_name: data.session_data?.session_name || 'inst-core',
       qr_raw: data.session_data?.qr_raw || null,
       qr_data_url: data.session_data?.qr_data_url || null,
+      pairing_requested_phone: data.session_data?.pairing_requested_phone || null,
+      pairing_code: data.session_data?.pairing_code || null,
       uptime_seconds: 0,
     };
   } catch (err) {

@@ -17,7 +17,7 @@ import { addExifToWebp } from './exif';
 import { downloadMediaFromUrl, parseSlideRequest, downloadMediaBuffer } from './mediaDownloader';
 import { generateMenuText, generateFaqText } from './menuHelper';
 import { ActivityLog, FeatureConfig, RateLimitConfig, BotConnectionStatus } from '../types';
-import { dbInsertActivityLog, dbSaveBotInstance, dbLoadFeatureConfigs } from '../supabase/client';
+import { dbInsertActivityLog, dbSaveBotInstance, dbLoadFeatureConfigs, dbGetBotInstance } from '../supabase/client';
 
 // Default initial features
 const DEFAULT_FEATURES: FeatureConfig[] = [
@@ -136,6 +136,8 @@ class BotManager {
   private mediaDownloadedToday = 0;
   private isConnecting = false;
   private lastFeatureSync = 0;
+  private pairingListenerInterval: NodeJS.Timeout | null = null;
+  private isRequestingPairing = false;
   private authDir: string;
   private configFile: string;
 
@@ -239,6 +241,43 @@ class BotManager {
     } catch {
       // Abaikan jika koneksi db bermasalah
     }
+  }
+
+  // Listener untuk menangani permintaan 8-digit pairing code dari Web Dashboard
+  public startPairingRequestListener() {
+    if (this.pairingListenerInterval) return;
+    this.pairingListenerInterval = setInterval(async () => {
+      if (this.status === 'connected' || !this.sock) return;
+      try {
+        const dbBot = await dbGetBotInstance('inst-core');
+        if (dbBot?.pairing_requested_phone && !this.isRequestingPairing) {
+          this.isRequestingPairing = true;
+          const phone = dbBot.pairing_requested_phone.replace(/\D/g, '');
+          console.log(`\n[Worker] Menerima permintaan Pairing Code dari Web Dashboard untuk nomor: +${phone}...`);
+          try {
+            const code = await this.sock.requestPairingCode(phone);
+            const formatted = code?.match(/.{1,4}/g)?.join('-') || code;
+            console.log(`[Worker] 8-Digit Pairing Code terbit: ${formatted}`);
+            await dbSaveBotInstance({
+              id: 'inst-core',
+              pairing_code: formatted,
+              pairing_requested_phone: null,
+            });
+          } catch (err) {
+            console.error('[Worker] Gagal generate pairing code:', err);
+            await dbSaveBotInstance({
+              id: 'inst-core',
+              pairing_code: null,
+              pairing_requested_phone: null,
+            });
+          } finally {
+            this.isRequestingPairing = false;
+          }
+        }
+      } catch {
+        // Ignored
+      }
+    }, 1500);
   }
 
   public getRateLimit(): RateLimitConfig {
@@ -384,6 +423,9 @@ class BotManager {
 
       this.sock.ev.on('creds.update', saveCreds);
 
+      // Mulai listener permintaan pairing code dari web dashboard
+      this.startPairingRequestListener();
+
       // Jika pengguna memilih metode Pairing Code (nomor HP), jangan cetak QR
       if (targetPhoneNumber && !state.creds.registered) {
         const cleanPhone = targetPhoneNumber.replace(/\D/g, '');
@@ -443,6 +485,10 @@ class BotManager {
         }
 
         if (connection === 'open') {
+          if (this.pairingListenerInterval) {
+            clearInterval(this.pairingListenerInterval);
+            this.pairingListenerInterval = null;
+          }
           this.isConnecting = false;
           this.status = 'connected';
           this.connectedAt = new Date().toISOString();

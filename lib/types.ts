@@ -11,6 +11,8 @@ export interface BotInstance {
   uptime_seconds: number;
   qr_raw?: string | null;
   qr_data_url?: string | null;
+  pairing_requested_phone?: string | null;
+  pairing_code?: string | null;
 }
 
 export type FeatureCategory = 'core' | 'media' | 'utility' | 'ai_fun';
