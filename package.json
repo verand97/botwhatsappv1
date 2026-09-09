@@ -4,8 +4,6 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:all": "concurrently -n \"DASHBOARD,BOT_WORKER\" -c \"cyan,green\" \"next dev\" \"tsx scripts/run-worker.ts\"",
-    "worker": "tsx scripts/run-worker.ts",
     "worker:reset": "tsx scripts/run-worker.ts --reset",
     "build": "next build",
     "start": "next start",

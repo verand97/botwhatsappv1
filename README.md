@@ -25,33 +25,27 @@ Pusat kontrol dan otomatisasi bot WhatsApp modern berbasis **Next.js**, **Bailey
 
 ## 🚀 Cara Menjalankan di Perangkat Lokal
 
-### 1. Jalankan Sekaligus (Dashboard + Bot WhatsApp) — *Direkomendasikan*
+### 1. Jalankan Cukup dengan 1 Perintah (`npm run dev`)
 
-Cukup buka satu terminal di folder proyek ini, lalu jalankan:
+Cukup buka terminal di folder proyek ini, lalu jalankan:
 
-```bash
-npm run dev:all
-```
-
-Perintah ini akan menyalakan:
-- 🌐 **Dashboard Web**: [http://localhost:3000](http://localhost:3000)
-- 🤖 **Worker WhatsApp Baileys**: Menangani pesan masuk, perintah, dan koneksi socket.
-
----
-
-### 2. Jalankan Secara Terpisah (Dua Terminal)
-
-Jika Anda lebih suka memantau log dashboard dan bot di jendela terpisah:
-
-**Terminal 1 (Dashboard Next.js):**
 ```bash
 npm run dev
 ```
-Buka browser Anda di `http://localhost:3000`.
 
-**Terminal 2 (Bot Worker WhatsApp):**
+**Keduanya langsung aktif dalam 1 proses bersamaan:**
+- 🌐 **Dashboard Web**: Otomatis aktif di [http://localhost:3000](http://localhost:3000).
+- 🤖 **Bot WhatsApp (Baileys)**: Otomatis langsung terhubung ke WhatsApp dan siap memproses perintah pesan masuk.
+
+Tidak perlu membuka terminal kedua, tidak perlu menjalankan worker terpisah, dan tidak perlu setup sesi ganda.
+
+---
+
+### 2. Reset Sesi WhatsApp (Jika Ingin Ganti Akun)
+
+Jika ingin mengganti nomor WhatsApp atau menghapus sesi login:
 ```bash
-npm run worker
+npm run worker:reset
 ```
 
 ---

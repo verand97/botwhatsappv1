@@ -11,7 +11,6 @@ import QRCode from 'qrcode';
 import sharp from 'sharp';
 import path from 'path';
 import fs from 'fs';
-import os from 'os';
 import pino from 'pino';
 import { addExifToWebp } from './exif';
 import { downloadMediaFromUrl, parseSlideRequest, downloadMediaBuffer } from './mediaDownloader';
@@ -140,26 +139,35 @@ class BotManager {
   private isRequestingPairing = false;
   private authDir: string;
   private configFile: string;
+  private stateFile: string;
+  private logsFile: string;
 
   constructor() {
     try {
       const baseDir = process.cwd();
       this.authDir = path.join(baseDir, 'sessions', 'baileys_auth');
       this.configFile = path.join(baseDir, 'sessions', 'bot_config.json');
+      this.stateFile = path.join(baseDir, 'sessions', 'bot_state.json');
+      this.logsFile = path.join(baseDir, 'sessions', 'bot_logs.json');
 
       if (!fs.existsSync(this.authDir)) {
         fs.mkdirSync(this.authDir, { recursive: true });
       }
 
       this.loadConfig();
+      this.loadLogs();
+      this.loadState();
 
-      // Note: Soket Baileys TIDAK boleh dijalankan otomatis di sini agar Next.js dev server
-      // dan API routes tidak membuka soket ganda/merusak sesi WhatsApp.
-      // Soket Baileys hanya dijalankan secara eksplisit oleh dedicated worker process.
+      // Otomatis aktifkan koneksi bot WhatsApp saat Next.js berjalan (npm run dev)
+      setTimeout(() => {
+        this.startBot().catch((e) => console.error('[BotManager] Auto-start error:', e));
+      }, 1000);
     } catch (err) {
       console.warn('[BotManager] Error initializing local sessions:', err);
       this.authDir = path.join(process.cwd(), 'sessions', 'baileys_auth');
       this.configFile = path.join(process.cwd(), 'sessions', 'bot_config.json');
+      this.stateFile = path.join(process.cwd(), 'sessions', 'bot_state.json');
+      this.logsFile = path.join(process.cwd(), 'sessions', 'bot_logs.json');
     }
   }
 
@@ -197,7 +205,84 @@ class BotManager {
     }
   }
 
+  public saveState() {
+    try {
+      const sessDir = path.dirname(this.stateFile);
+      if (!fs.existsSync(sessDir)) {
+        fs.mkdirSync(sessDir, { recursive: true });
+      }
+      fs.writeFileSync(
+        this.stateFile,
+        JSON.stringify(
+          {
+            status: this.status,
+            nomor_wa: this.nomorWa,
+            push_name: this.pushName,
+            connected_at: this.connectedAt,
+            qr_raw: this.qrRaw,
+            qr_data_url: this.qrDataUrl,
+            commands_count_today: this.commandsCountToday,
+            stickers_count_today: this.stickersCountToday,
+            media_downloaded_today: this.mediaDownloadedToday,
+            updated_at: new Date().toISOString(),
+          },
+          null,
+          2
+        )
+      );
+    } catch (e) {
+      console.warn('Warning saving state:', e);
+    }
+  }
+
+  public loadState() {
+    try {
+      if (fs.existsSync(this.stateFile)) {
+        const data = JSON.parse(fs.readFileSync(this.stateFile, 'utf-8'));
+        if (data.status) this.status = data.status;
+        if (data.nomor_wa !== undefined) this.nomorWa = data.nomor_wa;
+        if (data.push_name !== undefined) this.pushName = data.push_name;
+        if (data.connected_at !== undefined) this.connectedAt = data.connected_at;
+        if (data.qr_raw !== undefined) this.qrRaw = data.qr_raw;
+        if (data.qr_data_url !== undefined) this.qrDataUrl = data.qr_data_url;
+        if (data.commands_count_today) this.commandsCountToday = data.commands_count_today;
+        if (data.stickers_count_today) this.stickersCountToday = data.stickers_count_today;
+        if (data.media_downloaded_today) this.mediaDownloadedToday = data.media_downloaded_today;
+      }
+    } catch (e) {
+      console.warn('Error loading state:', e);
+    }
+  }
+
+  private saveLogs() {
+    try {
+      const sessDir = path.dirname(this.logsFile);
+      if (!fs.existsSync(sessDir)) {
+        fs.mkdirSync(sessDir, { recursive: true });
+      }
+      fs.writeFileSync(this.logsFile, JSON.stringify(this.logs.slice(0, 100), null, 2));
+    } catch (e) {
+      console.warn('Warning saving logs:', e);
+    }
+  }
+
+  private loadLogs() {
+    try {
+      if (fs.existsSync(this.logsFile)) {
+        const data = JSON.parse(fs.readFileSync(this.logsFile, 'utf-8'));
+        if (Array.isArray(data)) {
+          this.logs = data;
+        }
+      }
+    } catch (e) {
+      console.warn('Error loading logs:', e);
+    }
+  }
+
   public getStatus() {
+    if (!this.sock && this.status === 'disconnected') {
+      this.loadState();
+    }
     return {
       status: this.status,
       nomor_wa: this.nomorWa,
@@ -214,6 +299,9 @@ class BotManager {
   }
 
   public getLogs(): ActivityLog[] {
+    if (this.logs.length === 0) {
+      this.loadLogs();
+    }
     return this.logs;
   }
 
@@ -222,6 +310,7 @@ class BotManager {
   }
 
   public async syncFeaturesFromDb() {
+    this.loadConfig();
     try {
       const dbFeatures = await dbLoadFeatureConfigs();
       if (dbFeatures && dbFeatures.length > 0) {
@@ -248,15 +337,39 @@ class BotManager {
     this.pairingListenerInterval = setInterval(async () => {
       if (this.status === 'connected' || !this.sock) return;
       try {
-        const dbBot = await dbGetBotInstance('inst-core');
-        if (dbBot?.pairing_requested_phone && !this.isRequestingPairing) {
+        const reqFile = path.join(process.cwd(), 'sessions', 'pairing_request.json');
+        let requestedPhone: string | null = null;
+        if (fs.existsSync(reqFile)) {
+          try {
+            const reqData = JSON.parse(fs.readFileSync(reqFile, 'utf8'));
+            if (reqData && reqData.phone) {
+              requestedPhone = reqData.phone;
+            }
+          } catch {}
+        }
+
+        if (!requestedPhone) {
+          const dbBot = await dbGetBotInstance('inst-core');
+          if (dbBot?.pairing_requested_phone) {
+            requestedPhone = dbBot.pairing_requested_phone;
+          }
+        }
+
+        if (requestedPhone && !this.isRequestingPairing) {
           this.isRequestingPairing = true;
-          const phone = dbBot.pairing_requested_phone.replace(/\D/g, '');
+          const phone = requestedPhone.replace(/\D/g, '');
           console.log(`\n[Worker] Menerima permintaan Pairing Code dari Web Dashboard untuk nomor: +${phone}...`);
           try {
             const code = await this.sock.requestPairingCode(phone);
             const formatted = code?.match(/.{1,4}/g)?.join('-') || code;
             console.log(`[Worker] 8-Digit Pairing Code terbit: ${formatted}`);
+
+            const resFile = path.join(process.cwd(), 'sessions', 'pairing_response.json');
+            fs.writeFileSync(resFile, JSON.stringify({ code: formatted, created_at: Date.now() }));
+            if (fs.existsSync(reqFile)) {
+              try { fs.unlinkSync(reqFile); } catch {}
+            }
+
             await dbSaveBotInstance({
               id: 'inst-core',
               pairing_code: formatted,
@@ -264,6 +377,9 @@ class BotManager {
             });
           } catch (err) {
             console.error('[Worker] Gagal generate pairing code:', err);
+            if (fs.existsSync(reqFile)) {
+              try { fs.unlinkSync(reqFile); } catch {}
+            }
             await dbSaveBotInstance({
               id: 'inst-core',
               pairing_code: null,
@@ -276,7 +392,7 @@ class BotManager {
       } catch {
         // Ignored
       }
-    }, 1500);
+    }, 1000);
   }
 
   public getRateLimit(): RateLimitConfig {
@@ -318,6 +434,7 @@ class BotManager {
 
   public clearLogs() {
     this.logs = [];
+    this.saveLogs();
   }
 
   public addLog(item: Omit<ActivityLog, 'id' | 'created_at'>) {
@@ -327,6 +444,7 @@ class BotManager {
       created_at: new Date().toISOString(),
     };
     this.logs = [log, ...this.logs.slice(0, 99)];
+    this.saveLogs();
     dbInsertActivityLog(log).catch(() => {});
   }
 
@@ -335,10 +453,6 @@ class BotManager {
     const cleanPhone = phoneNumber.replace(/\D/g, '');
     if (!cleanPhone || cleanPhone.length < 9) {
       throw new Error('Nomor WhatsApp harus menyertakan kode negara (contoh: 6281234567890)');
-    }
-
-    if (process.env.IS_WORKER !== 'true') {
-      throw new Error('Pairing code harus diminta melalui worker terminal: npm run worker -- ' + cleanPhone);
     }
 
     // Jika belum ada socket atau status terputus, mulai bot
@@ -367,14 +481,12 @@ class BotManager {
     throw new Error('Soket Baileys belum siap, silakan coba beberapa saat lagi.');
   }
 
+  public isBusyConnecting(): boolean {
+    return this.isConnecting;
+  }
+
   // Start real Baileys connection
   public async startBot(targetPhoneNumber?: string) {
-    // Hanya worker process resmi yang diizinkan membuka soket Baileys
-    if (process.env.IS_WORKER !== 'true') {
-      console.warn('[BotManager] startBot() dipanggil di luar Worker process (Next.js server). Melewati pembukaan soket Baileys.');
-      return this.getStatus();
-    }
-
     if (this.sock && this.status === 'connected') {
       return this.getStatus();
     }
@@ -481,6 +593,7 @@ class BotManager {
             console.error('Failed to generate QR DataURL:', e);
           }
           this.status = 'disconnected'; // Waiting for scan
+          this.saveState();
         }
 
         if (connection === 'open') {
@@ -503,6 +616,7 @@ class BotManager {
 
           this.nomorWa = masked;
           this.pushName = this.sock?.user?.name || 'Verand Bot';
+          this.saveState();
 
           console.log('\n🎉 ==============================================================');
           console.log(`✅ BERHASIL TERHUBUNG KE WHATSAPP: ${cleanNum} (${this.pushName})`);
@@ -542,6 +656,7 @@ class BotManager {
           this.connectedAt = null;
           this.qrRaw = null;
           this.qrDataUrl = null;
+          this.saveState();
 
           dbSaveBotInstance({
             id: 'inst-core',
