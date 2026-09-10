@@ -13,7 +13,7 @@ import path from 'path';
 import fs from 'fs';
 import pino from 'pino';
 import { addExifToWebp } from './exif';
-import { downloadMediaFromUrl, parseSlideRequest, downloadMediaBuffer } from './mediaDownloader';
+import { downloadMediaFromUrl, parseSlideRequest, downloadMediaBuffer, detectPlatform } from './mediaDownloader';
 import { generateMenuText, generateFaqText } from './menuHelper';
 import { ActivityLog, FeatureConfig, RateLimitConfig, BotConnectionStatus } from '../types';
 import { dbInsertActivityLog, dbSaveBotInstance, dbLoadFeatureConfigs, dbGetBotInstance } from '../supabase/client';
@@ -1004,14 +1004,49 @@ class BotManager {
 
     // 6. Media Downloader (§5.1)
     const dlFeat = this.features.find((f) => f.feature_key === 'downloader');
-    const isDlCmd =
-      dlFeat &&
-      dlFeat.is_enabled &&
-      (lower.startsWith(dlFeat.command_trigger) ||
-        lower.startsWith(`${prefix}dl`) ||
-        lower.startsWith('!dl') ||
-        lower.startsWith('/dl') ||
-        dlFeat.aliases.some((a) => lower.startsWith(a)));
+
+    // Check all common prefixes and triggers dynamically
+    const activePrefixes = Array.from(new Set([prefix, '!', '/', '.']));
+    const dlKeywords = [
+      'dl', 'download',
+      'yt', 'youtube', 'ytmp4', 'ytv',
+      'ytmp3', 'ytaudio', 'yta',
+      'tt', 'tiktok',
+      'ig', 'instagram', 'reel', 'reels',
+      'fb', 'facebook',
+      'tw', 'twitter', 'x'
+    ];
+
+    const isCommandTriggered =
+      activePrefixes.some((pfx) =>
+        dlKeywords.some(
+          (kw) =>
+            lower.startsWith(`${pfx}${kw} `) ||
+            lower === `${pfx}${kw}` ||
+            lower.startsWith(`${pfx}${kw}\n`)
+        )
+      ) ||
+      (dlFeat?.command_trigger ? lower.startsWith(dlFeat.command_trigger) : false) ||
+      Boolean(
+        dlFeat?.aliases &&
+          dlFeat.aliases.some((a) => {
+            const raw = a.replace(/^[!/.]/, '');
+            return activePrefixes.some(
+              (pfx) =>
+                lower.startsWith(`${pfx}${raw} `) ||
+                lower === `${pfx}${raw}` ||
+                lower.startsWith(`${pfx}${raw}\n`)
+            );
+          })
+      );
+
+    // In private chats, allow pasting supported social media URLs directly
+    const directUrlMatch = cleanText.match(/https?:\/\/[^\s]+/i);
+    const isDirectSocialUrl =
+      !remoteJid.endsWith('@g.us') &&
+      Boolean(directUrlMatch && detectPlatform(directUrlMatch[0]) !== 'unknown');
+
+    const isDlCmd = dlFeat && dlFeat.is_enabled && (isCommandTriggered || isDirectSocialUrl);
 
     if (isDlCmd && dlFeat) {
       const parsedReq = parseSlideRequest(cleanText);
@@ -1022,13 +1057,13 @@ class BotManager {
           `*Contoh Unduh Semua:* ${prefix}dl https://vt.tiktok.com/xxxxxx/\n` +
           `*Contoh Unduh Per Slide:* ${prefix}dl <url> 2 (atau: slide 2, slide 1-3, slide 1,3, all)\n\n` +
           `*Perintah Cepat:*\n` +
-          `• *!tt <url> [slide]* : Unduh video/audio/slide TikTok tanpa watermark\n` +
-          `• *!ig <url> [slide]* : Unduh video Reels / carousel foto Instagram\n` +
-          `• *!yt <url>* : Unduh video YouTube (MP4)\n` +
-          `• *!ytmp3 <url>* : Unduh audio YouTube (MP3)\n` +
-          `• *!fb <url>* : Unduh video Facebook HD/SD\n` +
-          `• *!twitter <url>* : Unduh video Twitter/X\n\n` +
-          `_Tips Foto Slide:_ Ketik nomor slide (misal *!tt <url> 3* atau *!ig <url> slide 1-4*) atau kirim link saja untuk langsung mengunduh semua foto!`;
+          `• *${prefix}tt <url> [slide]* : Unduh video/audio/slide TikTok tanpa watermark\n` +
+          `• *${prefix}ig <url> [slide]* : Unduh video Reels / carousel foto Instagram\n` +
+          `• *${prefix}yt <url>* : Unduh video YouTube (MP4)\n` +
+          `• *${prefix}ytmp3 <url>* : Unduh audio YouTube (MP3)\n` +
+          `• *${prefix}fb <url>* : Unduh video Facebook HD/SD\n` +
+          `• *${prefix}twitter <url>* : Unduh video Twitter/X\n\n` +
+          `_Tips:_ Anda juga bisa langsung menempelkan tautan YouTube / TikTok / Instagram langsung di chat pribadi bot!`;
 
         await this.sock.sendMessage(remoteJid, { text: helpText }, { quoted: msg });
         return;
@@ -1036,11 +1071,15 @@ class BotManager {
 
       const targetUrl = parsedReq.url;
       const slideIndices = parsedReq.slideIndices;
+      const textWithoutUrl = cleanText.replace(targetUrl, '').trim().toLowerCase();
       const isAudioOnly =
-        lower.includes('ytmp3') ||
-        lower.includes('--audio') ||
-        lower.includes('-a') ||
-        lower.includes('mp3');
+        textWithoutUrl.includes('ytmp3') ||
+        textWithoutUrl.includes('ytaudio') ||
+        textWithoutUrl.includes('yta') ||
+        textWithoutUrl.includes('--audio') ||
+        textWithoutUrl.includes('-a') ||
+        textWithoutUrl.includes('audio') ||
+        textWithoutUrl.includes('mp3');
 
       const startTime = Date.now();
 

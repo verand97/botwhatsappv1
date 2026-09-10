@@ -4,6 +4,11 @@
  * Facebook, Twitter/X, and Instagram.
  */
 
+import { execFile } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const ruhend = require('ruhend-scraper');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -387,11 +392,291 @@ async function extractTikTok(
 }
 
 /**
- * YouTube media downloader (MP4 video or MP3 audio)
+ * Execute yt-dlp binary with safe parameters and timeout
+ */
+function runYtDlp(args: string[], timeoutMs: number = 85000): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'yt-dlp',
+      args,
+      {
+        timeout: timeoutMs,
+        maxBuffer: 25 * 1024 * 1024,
+      },
+      (err, stdout, stderr) => {
+        if (err) {
+          return reject(new Error(stderr || err.message));
+        }
+        resolve({ stdout: stdout || '', stderr: stderr || '' });
+      }
+    );
+  });
+}
+
+let isYtDlpAvailableCache: boolean | null = null;
+async function checkYtDlpAvailable(): Promise<boolean> {
+  if (isYtDlpAvailableCache !== null) return isYtDlpAvailableCache;
+  try {
+    await runYtDlp(['--version'], 5000);
+    isYtDlpAvailableCache = true;
+  } catch {
+    isYtDlpAvailableCache = false;
+  }
+  return isYtDlpAvailableCache;
+}
+
+/**
+ * Direct video downloader via yt-dlp for non-YouTube platforms (Facebook, Twitter/X, Instagram)
+ */
+async function extractVideoViaYtDlp(
+  url: string,
+  platform: MediaPlatform,
+  defaultTitle: string
+): Promise<MediaDownloadResult | null> {
+  const hasYtDlp = await checkYtDlpAvailable();
+  if (!hasYtDlp) return null;
+
+  const tempDir = path.join(os.tmpdir(), 'verand_media');
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+
+  const outPath = path.join(tempDir, `${platform}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.mp4`);
+
+  try {
+    const args: string[] = [
+      '--no-update',
+      '--no-playlist',
+      '--js-runtimes', 'node',
+      '--no-simulate',
+      '--print', 'METADATA:%(title)s|||%(uploader)s|||%(thumbnail)s',
+      '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+      '--merge-output-format', 'mp4',
+      '--max-filesize', '45M',
+      '-o', outPath,
+      url,
+    ];
+
+    const { stdout } = await runYtDlp(args, 65000);
+
+    let title = defaultTitle;
+    let author = `${platform} Creator`;
+    let thumbnail = '';
+
+    const metaMatch = stdout.match(/METADATA:(.*)/);
+    if (metaMatch) {
+      const parts = metaMatch[1].split('|||');
+      if (parts[0] && parts[0] !== 'NA') title = parts[0].trim();
+      if (parts[1] && parts[1] !== 'NA') author = parts[1].trim();
+      if (parts[2] && parts[2] !== 'NA') thumbnail = parts[2].trim();
+    }
+
+    if (fs.existsSync(outPath)) {
+      const fileBuffer = fs.readFileSync(outPath);
+      try {
+        fs.unlinkSync(outPath);
+      } catch {}
+
+      if (fileBuffer.length > 0) {
+        const platformName = platform === 'facebook' ? 'Facebook' : platform === 'twitter' ? 'Twitter / X' : 'Instagram';
+        return {
+          success: true,
+          platform,
+          type: 'video',
+          title,
+          author,
+          thumbnail,
+          buffer: fileBuffer,
+          caption: `🎬 *${platformName} Video*\n📌 *Judul:* ${title.slice(0, 120)}\n\n⚡ _Powered by Verand.Bot_`,
+        };
+      }
+    }
+    return null;
+  } catch {
+    if (fs.existsSync(outPath)) {
+      try {
+        fs.unlinkSync(outPath);
+      } catch {}
+    }
+    return null;
+  }
+}
+
+/**
+ * Native YouTube video & audio extractor using yt-dlp engine with format & size limits
+ */
+async function extractYouTubeViaYtDlp(
+  url: string,
+  isAudioOnly: boolean = false
+): Promise<MediaDownloadResult | null> {
+  const hasYtDlp = await checkYtDlpAvailable();
+  if (!hasYtDlp) return null;
+
+  const tempDir = path.join(os.tmpdir(), 'verand_media');
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+
+  const ext = isAudioOnly ? 'mp3' : 'mp4';
+  const outPath = path.join(tempDir, `yt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`);
+
+  try {
+    const args: string[] = [
+      '--no-update',
+      '--no-playlist',
+      '--js-runtimes', 'node',
+      '--no-simulate',
+      '--print', 'METADATA:%(title)s|||%(uploader)s|||%(duration_string)s|||%(thumbnail)s',
+    ];
+
+    if (isAudioOnly) {
+      args.push(
+        '-x',
+        '--audio-format', 'mp3',
+        '--audio-quality', '128K',
+        '--max-filesize', '35M',
+        '-o', outPath,
+        url
+      );
+    } else {
+      args.push(
+        '-f', 'bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/bv*[height<=720]+ba/b[height<=720]/best',
+        '--merge-output-format', 'mp4',
+        '--max-filesize', '45M',
+        '-o', outPath,
+        url
+      );
+    }
+
+    const { stdout, stderr } = await runYtDlp(args, 85000);
+
+    // Parse metadata from print output
+    let title = 'YouTube Media';
+    let author = 'YouTube Creator';
+    let duration = '';
+    let thumbnail = '';
+
+    const metaMatch = stdout.match(/METADATA:(.*)/);
+    if (metaMatch) {
+      const parts = metaMatch[1].split('|||');
+      if (parts[0]) title = parts[0].trim();
+      if (parts[1]) author = parts[1].trim();
+      if (parts[2]) duration = parts[2].trim();
+      if (parts[3]) thumbnail = parts[3].trim();
+    }
+
+    // Check if file was created successfully
+    if (fs.existsSync(outPath)) {
+      const fileBuffer = fs.readFileSync(outPath);
+      // Clean up temp file immediately to avoid storage leak
+      try {
+        fs.unlinkSync(outPath);
+      } catch {}
+
+      if (fileBuffer.length > 0) {
+        const sizeMb = (fileBuffer.length / (1024 * 1024)).toFixed(1);
+        const durationText = duration ? `⏱️ *Durasi:* ${duration}\n` : '';
+        const caption = isAudioOnly
+          ? `🎵 *YouTube Audio MP3*\n📌 *Judul:* ${title.slice(0, 120)}\n👤 *Channel:* ${author}\n${durationText}💾 *Ukuran:* ${sizeMb} MB\n\n⚡ _Powered by Verand.Bot_`
+          : `🎬 *YouTube Video MP4*\n📌 *Judul:* ${title.slice(0, 120)}\n👤 *Channel:* ${author}\n${durationText}💾 *Ukuran:* ${sizeMb} MB\n\n⚡ _Powered by Verand.Bot_`;
+
+        return {
+          success: true,
+          platform: 'youtube',
+          type: isAudioOnly ? 'audio' : 'video',
+          title,
+          author,
+          thumbnail,
+          buffer: fileBuffer,
+          caption,
+        };
+      }
+    }
+
+    // If file was not created, inspect output for size caps or restrictions
+    const combinedOutput = (stdout + ' ' + stderr).toLowerCase();
+    if (combinedOutput.includes('file is larger than max-filesize')) {
+      return {
+        success: false,
+        platform: 'youtube',
+        type: isAudioOnly ? 'audio' : 'video',
+        title,
+        author,
+        thumbnail,
+        error: isAudioOnly
+          ? '⚠️ Ukuran file audio melebihi batas WhatsApp (35 MB). Silakan pilih audio dengan durasi lebih pendek.'
+          : '⚠️ Ukuran video melebihi batas pengiriman WhatsApp (maks. 45 MB). Silakan unduh versi audio dengan perintah: *!ytmp3 <link>*',
+      };
+    }
+
+    if (combinedOutput.includes('video unavailable') || combinedOutput.includes('private video')) {
+      return {
+        success: false,
+        platform: 'youtube',
+        type: isAudioOnly ? 'audio' : 'video',
+        error: '⚠️ Video YouTube tidak dapat diakses (bersifat privat, dihapus, atau dibatasi umur/wilayah).',
+      };
+    }
+
+    return null;
+  } catch (err) {
+    const errMsg = ((err as Error).message || '').toLowerCase();
+    console.warn('[YouTube yt-dlp] error:', errMsg);
+
+    if (fs.existsSync(outPath)) {
+      try {
+        fs.unlinkSync(outPath);
+      } catch {}
+    }
+
+    if (errMsg.includes('file is larger than max-filesize')) {
+      return {
+        success: false,
+        platform: 'youtube',
+        type: isAudioOnly ? 'audio' : 'video',
+        error: isAudioOnly
+          ? '⚠️ Ukuran file audio melebihi batas WhatsApp (35 MB).'
+          : '⚠️ Ukuran video melebihi batas pengiriman WhatsApp (maks. 45 MB). Silakan unduh versi audio dengan perintah: *!ytmp3 <link>*',
+      };
+    }
+
+    if (errMsg.includes('video unavailable') || errMsg.includes('private video')) {
+      return {
+        success: false,
+        platform: 'youtube',
+        type: isAudioOnly ? 'audio' : 'video',
+        error: '⚠️ Video YouTube tidak dapat diakses (bersifat privat atau dibatasi negara/usia).',
+      };
+    }
+
+    return null;
+  }
+}
+
+/**
+ * YouTube media downloader (MP4 video or MP3 audio) with multi-tier engine
  */
 async function extractYouTube(url: string, isAudioOnly: boolean = false): Promise<MediaDownloadResult> {
+  // Normalize YouTube shorts / mobile URLs if needed
+  let cleanUrl = url;
+  const shortMatch = url.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]+)/i);
+  if (shortMatch) {
+    cleanUrl = `https://www.youtube.com/watch?v=${shortMatch[1]}`;
+  }
+
+  // Provider 1: yt-dlp native (Best reliability, 100% direct MP4/MP3)
   try {
-    const res = await btch.youtube(url);
+    const ytDlpRes = await extractYouTubeViaYtDlp(cleanUrl, isAudioOnly);
+    if (ytDlpRes) {
+      return ytDlpRes;
+    }
+  } catch (e) {
+    console.warn('[YouTube DL] yt-dlp error:', (e as Error).message);
+  }
+
+  // Provider 2: btch.youtube (External API Fallback)
+  try {
+    const res = await btch.youtube(cleanUrl);
     if (res && res.status && (res.mp4 || res.mp3)) {
       const title = res.title || 'YouTube Media';
       const author = res.author || 'YouTube Creator';
@@ -400,7 +685,7 @@ async function extractYouTube(url: string, isAudioOnly: boolean = false): Promis
       const audioUrl = res.mp3 || '';
 
       if (isAudioOnly && audioUrl) {
-        const buffer = await downloadMediaBuffer(audioUrl, 30 * 1024 * 1024);
+        const buffer = await downloadMediaBuffer(audioUrl, 35 * 1024 * 1024);
         return {
           success: true,
           platform: 'youtube',
@@ -418,36 +703,38 @@ async function extractYouTube(url: string, isAudioOnly: boolean = false): Promis
       const chosenType: MediaType = videoUrl ? 'video' : 'audio';
       const buffer = await downloadMediaBuffer(chosenUrl, 45 * 1024 * 1024);
 
-      return {
-        success: true,
-        platform: 'youtube',
-        type: chosenType,
-        title,
-        author,
-        thumbnail,
-        mediaUrl: chosenUrl,
-        audioUrl: audioUrl || undefined,
-        buffer: buffer || undefined,
-        caption: `🎬 *YouTube ${chosenType === 'video' ? 'Video MP4' : 'Audio MP3'}*\n📌 *Judul:* ${title.slice(0, 120)}\n👤 *Channel:* ${author}\n\n⚡ _Powered by Verand.Bot_`,
-      };
+      if (buffer || chosenUrl) {
+        return {
+          success: true,
+          platform: 'youtube',
+          type: chosenType,
+          title,
+          author,
+          thumbnail,
+          mediaUrl: chosenUrl,
+          audioUrl: audioUrl || undefined,
+          buffer: buffer || undefined,
+          caption: `🎬 *YouTube ${chosenType === 'video' ? 'Video MP4' : 'Audio MP3'}*\n📌 *Judul:* ${title.slice(0, 120)}\n👤 *Channel:* ${author}\n\n⚡ _Powered by Verand.Bot_`,
+        };
+      }
     }
   } catch (e) {
     console.warn('[YouTube DL] Btch error:', (e as Error).message);
   }
 
-  // Fallback: search metadata if download link is unavailable
+  // Provider 3: ruhend metadata fallback
   try {
-    const yts = await ruhend.ytsearch(url);
+    const yts = await ruhend.ytsearch(cleanUrl);
     const video = yts?.video?.[0];
     if (video) {
       return {
         success: false,
         platform: 'youtube',
-        type: 'video',
+        type: isAudioOnly ? 'audio' : 'video',
         title: video.title,
         author: video.authorName,
         thumbnail: video.thumbnail,
-        error: `Video YouTube "${video.title}" ditemukan (${video.durationH}), tetapi link download langsung sedang diproses ulang oleh server. Coba beberapa saat lagi atau gunakan resolusi lebih rendah.`,
+        error: `Video YouTube "${video.title}" ditemukan (${video.durationH}), tetapi link unduhan sedang dibatasi oleh YouTube. Coba tautan lain atau gunakan resolusi lebih rendah.`,
       };
     }
   } catch {
@@ -457,13 +744,13 @@ async function extractYouTube(url: string, isAudioOnly: boolean = false): Promis
   return {
     success: false,
     platform: 'youtube',
-    type: 'video',
-    error: 'Gagal mengunduh video YouTube. Pastikan URL valid dan video tidak dibatasi usia/negara.',
+    type: isAudioOnly ? 'audio' : 'video',
+    error: 'Gagal mengunduh video YouTube. Pastikan URL valid dan video bersifat publik (tidak dibatasi usia/wilayah).',
   };
 }
 
 /**
- * Facebook media downloader (HD / SD video)
+ * Facebook media downloader (HD / SD video) with yt-dlp fallback
  */
 async function extractFacebook(url: string): Promise<MediaDownloadResult> {
   let videoUrl = '';
@@ -504,6 +791,16 @@ async function extractFacebook(url: string): Promise<MediaDownloadResult> {
     };
   }
 
+  // Provider 3: yt-dlp fallback
+  try {
+    const ytDlpRes = await extractVideoViaYtDlp(url, 'facebook', 'Facebook Video');
+    if (ytDlpRes) {
+      return ytDlpRes;
+    }
+  } catch (e) {
+    console.warn('[Facebook DL] yt-dlp fallback error:', (e as Error).message);
+  }
+
   return {
     success: false,
     platform: 'facebook',
@@ -513,9 +810,10 @@ async function extractFacebook(url: string): Promise<MediaDownloadResult> {
 }
 
 /**
- * Twitter / X media downloader
+ * Twitter / X media downloader with yt-dlp fallback
  */
 async function extractTwitter(url: string): Promise<MediaDownloadResult> {
+  // Provider 1: btch.twitter
   try {
     const res = await btch.twitter(url);
     if (res && res.status && res.url) {
@@ -543,6 +841,16 @@ async function extractTwitter(url: string): Promise<MediaDownloadResult> {
     }
   } catch (e) {
     console.warn('[Twitter DL] Btch error:', (e as Error).message);
+  }
+
+  // Provider 2: yt-dlp fallback
+  try {
+    const ytDlpRes = await extractVideoViaYtDlp(url, 'twitter', 'Twitter / X Video');
+    if (ytDlpRes) {
+      return ytDlpRes;
+    }
+  } catch (e) {
+    console.warn('[Twitter DL] yt-dlp fallback error:', (e as Error).message);
   }
 
   return {
@@ -705,6 +1013,16 @@ async function extractInstagram(
       buffer: buffer || undefined,
       caption: `🎬 *Instagram Reel/Video*\n👤 *Akun:* @${author}\n📌 *Caption:* ${title.slice(0, 120)}\n\n⚡ _Powered by Verand.Bot_`,
     };
+  }
+
+  // Provider 4: yt-dlp fallback for Instagram reels / video
+  try {
+    const ytDlpRes = await extractVideoViaYtDlp(url, 'instagram', 'Instagram Reel / Video');
+    if (ytDlpRes) {
+      return ytDlpRes;
+    }
+  } catch (e) {
+    console.warn('[Instagram DL] yt-dlp fallback error:', (e as Error).message);
   }
 
   return {
