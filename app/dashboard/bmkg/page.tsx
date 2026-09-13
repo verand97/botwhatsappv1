@@ -843,7 +843,7 @@ export default function BmkgDashboardPage() {
                     : 'https://inderaja.bmkg.go.id/IMAGE/HOTSPOT/Hotspot_Indonesia.png'
                 }
                 alt="Citra Satelit BMKG"
-                className="w-full h-auto object-contain max-h-[600px] mx-auto"
+                className="w-full h-auto object-contain max-h-150 mx-auto"
               />
             </div>
 
@@ -905,7 +905,7 @@ export default function BmkgDashboardPage() {
             </div>
 
             {/* Maritime Regions Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[550px] overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-137.5 overflow-y-auto pr-1">
               {filteredMaritime.map((item, idx) => {
                 const hasSangatTinggi = item.warning.sangatTinggi && item.warning.sangatTinggi.length > 0;
                 const hasTinggi = item.warning.tinggi && item.warning.tinggi.length > 0;
