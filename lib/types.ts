@@ -37,6 +37,10 @@ export interface FeatureConfig {
     auto_replies?: { trigger: string; response: string }[];
     welcome_message?: string;
     anti_link?: boolean;
+    bmkg_auto_alert?: boolean;
+    bmkg_alert_recipients?: string[];
+    bmkg_min_magnitude?: number;
+    default_weather_city?: string;
   };
 }
 

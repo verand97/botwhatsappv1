@@ -16,6 +16,7 @@ export function generateMenuText(prefix: string, features?: FeatureConfig[]): st
     enabledMap.set('sticker_to_media', {} as FeatureConfig);
     enabledMap.set('ai_chat', {} as FeatureConfig);
     enabledMap.set('auto_reply', {} as FeatureConfig);
+    enabledMap.set('bmkg_monitor', {} as FeatureConfig);
   }
 
   const items: string[] = [];
@@ -55,7 +56,19 @@ export function generateMenuText(prefix: string, features?: FeatureConfig[]): st
     );
   }
 
-  // 5. Auto-Reply & FAQ
+  // 5. Pantauan BMKG & Bencana
+  if (enabledMap.has('bmkg_monitor')) {
+    items.push(
+      `🌋 *Pantauan BMKG & Bencana*\n` +
+      `• \`${prefix}gempa\` : Gempa terkini M 5.0+ / dirasakan + Peta Shakemap\n` +
+      `• \`${prefix}cuaca <kota>\` : Prakiraan cuaca (contoh: \`${prefix}cuaca bandung\`)\n` +
+      `• \`${prefix}satelit\` : Citra Satelit Cuaca Himawari-9 & Hujan\n` +
+      `• \`${prefix}gelombang\` : Peringatan dini gelombang maritim laut\n` +
+      `• \`${prefix}bmkg\` : Lihat seluruh fitur pantauan BMKG & bencana`
+    );
+  }
+
+  // 6. Auto-Reply & FAQ
   if (enabledMap.has('auto_reply')) {
     items.push(
       `ℹ️ *Bantuan & FAQ*\n` +
@@ -122,11 +135,26 @@ export function generateFaqText(
     `• *Cara Pakai:* Ketik \`${prefix}ai <pertanyaan>\` atau \`${prefix}tanya <pertanyaan>\`.\n` +
     `• *Contoh:* \`${prefix}ai buatkan ide konten video untuk promosi produk\`\n\n` +
     `─────────────────────\n\n` +
-    `❓ *5. PERTANYAAN UMUM (FAQ)*\n` +
+    `🌋 *5. PANDUAN PANTAUAN BMKG & BENCANA ALAM*\n` +
+    `• *Fungsi:* Menghubungkan langsung dengan server BMKG Indonesia untuk pemantauan cuaca, gempa bumi, citra satelit, maritim, dan karhutla.\n` +
+    `• *Perintah Lengkap:*\n` +
+    `  ▫️ \`${prefix}gempa\` ➔ Gempa bumi terkini M 5.0+ / dirasakan lengkap dengan peta guncangan (Shakemap)\n` +
+    `  ▫️ \`${prefix}gempa5m\` ➔ Daftar 10 gempa bumi terbaru berkekuatan M 5.0 ke atas\n` +
+    `  ▫️ \`${prefix}dirasakan\` ➔ 10 gempa bumi yang dirasakan masyarakat + skala MMI\n` +
+    `  ▫️ \`${prefix}cuaca <nama kota>\` ➔ Prakiraan cuaca (suhu, hujan, kelembapan, angin, UV)\n` +
+    `  ▫️ \`${prefix}satelit\` ➔ Citra Satelit Himawari-9 Enhanced IR (awan konvektif & badai)\n` +
+    `  ▫️ \`${prefix}satelit hujan\` ➔ Peta Satelit Potensi Hujan BMKG\n` +
+    `  ▫️ \`${prefix}hotspot\` ➔ Peta Titik Panas & Pantauan Bahaya Karhutla\n` +
+    `  ▫️ \`${prefix}gelombang\` ➔ Peringatan dini gelombang maritim laut Indonesia\n` +
+    `  ▫️ \`${prefix}udara <kota>\` ➔ Indeks Kualitas Udara (AQI) & partikulat PM2.5\n\n` +
+    `─────────────────────\n\n` +
+    `❓ *6. PERTANYAAN UMUM (FAQ)*\n` +
     `• *Q: Mengapa bot tidak merespon?*\n` +
     `  *A:* Pastikan menyertakan prefix aktif (\`${prefix}\`) di awal pesan, contoh: \`${prefix}menu\` atau \`${prefix}dl <link>\`.\n\n` +
     `• *Q: Apakah video TikTok ada watermark-nya?*\n` +
     `  *A:* Tidak, semua video TikTok diunduh bersih tanpa watermark.\n\n` +
+    `• *Q: Dari mana data cuaca & bencana diambil?*\n` +
+    `  *A:* Semua data gempa, cuaca, citra satelit, dan maritim bersumber langsung dari server resmi BMKG (Badan Meteorologi, Klimatologi, dan Geofisika Indonesia).\n\n` +
     `• *Q: Apakah foto slide yang diunduh terpotong?*\n` +
     `  *A:* Tidak, seluruh foto diunduh dengan resolusi penuh dari server resmi.` +
     autoRepliesList +

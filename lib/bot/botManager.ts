@@ -15,6 +15,22 @@ import pino from 'pino';
 import { addExifToWebp } from './exif';
 import { downloadMediaFromUrl, parseSlideRequest, downloadMediaBuffer, detectPlatform } from './mediaDownloader';
 import { generateMenuText, generateFaqText } from './menuHelper';
+import {
+  getLatestEarthquake,
+  getRecentEarthquakes,
+  getFeltEarthquakes,
+  getWeatherForecast,
+  getSatelliteImage,
+  getMaritimeWarnings,
+  getAirQuality,
+  formatEarthquakeText,
+  formatRecentEarthquakesText,
+  formatFeltEarthquakesText,
+  formatWeatherText,
+  formatMaritimeText,
+  formatAirQualityText,
+  formatBmkgMenuText,
+} from './bmkgService';
 import { ActivityLog, FeatureConfig, RateLimitConfig, BotConnectionStatus } from '../types';
 import { dbInsertActivityLog, dbSaveBotInstance, dbLoadFeatureConfigs, dbGetBotInstance } from '../supabase/client';
 
@@ -106,6 +122,37 @@ const DEFAULT_FEATURES: FeatureConfig[] = [
       welcome_message: 'Selamat datang di grup!',
     },
   },
+  {
+    id: 'feat-bmkg-monitor',
+    feature_key: 'bmkg_monitor',
+    name: 'Pantauan BMKG & Bencana',
+    tagline: 'Pantau gempa bumi real-time, infografis Shakemap, cuaca kota, citra satelit Himawari, peringatan gelombang, dan hotspot karhutla',
+    category: 'utility',
+    is_enabled: true,
+    command_trigger: '!bmkg',
+    aliases: [
+      '!gempa',
+      '!gempaterkini',
+      '!autogempa',
+      '!gempa5m',
+      '!gempadirasakan',
+      '!cuaca',
+      '!satelit',
+      '!gelombang',
+      '!maritim',
+      '!hotspot',
+      '!karhutla',
+      '!udara',
+      '!aqi',
+      '!bencana',
+    ],
+    extra_settings: {
+      bmkg_auto_alert: false,
+      bmkg_alert_recipients: [],
+      bmkg_min_magnitude: 5.0,
+      default_weather_city: 'Jakarta',
+    },
+  },
 ];
 
 const DEFAULT_RATE_LIMIT: RateLimitConfig = {
@@ -137,6 +184,8 @@ class BotManager {
   private lastFeatureSync = 0;
   private pairingListenerInterval: NodeJS.Timeout | null = null;
   private isRequestingPairing = false;
+  private bmkgWatcherInterval: NodeJS.Timeout | null = null;
+  private lastKnownEarthquakeId: string | null = null;
   private authDir: string;
   private configFile: string;
   private stateFile: string;
@@ -277,6 +326,10 @@ class BotManager {
     } catch (e) {
       console.warn('Error loading logs:', e);
     }
+  }
+
+  public getSocket(): WASocket | null {
+    return this.sock;
   }
 
   public getStatus() {
@@ -644,10 +697,17 @@ class BotManager {
             execution_time_ms: 100,
             detail: 'Koneksi WhatsApp Web Multi-Device aktif & socket persisten terhubung.',
           });
+
+          // Mulai background watcher peringatan gempa BMKG jika diaktifkan
+          this.startBmkgEarthquakeWatcher();
         }
 
         if (connection === 'close') {
           this.isConnecting = false;
+          if (this.bmkgWatcherInterval) {
+            clearInterval(this.bmkgWatcherInterval);
+            this.bmkgWatcherInterval = null;
+          }
           const statusCode = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
           const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
@@ -1296,10 +1356,415 @@ class BotManager {
         }
       }
     }
+
+    // 8. Pantauan BMKG & Bencana Alam
+    const bmkgFeat = this.features.find((f) => f.feature_key === 'bmkg_monitor');
+    if (bmkgFeat && bmkgFeat.is_enabled) {
+      const activePrefixes = Array.from(new Set([prefix, '!', '/', '.']));
+      const matchTrigger = (cmds: string[]) =>
+        activePrefixes.some((pfx) =>
+          cmds.some(
+            (c) =>
+              lower === `${pfx}${c}` ||
+              lower.startsWith(`${pfx}${c} `) ||
+              lower.startsWith(`${pfx}${c}\n`)
+          )
+        ) ||
+        cmds.some((c) => lower === c || lower.startsWith(`${c} `));
+
+      // 8.1 Menu BMKG
+      if (matchTrigger(['bmkg', 'bencana', 'gempahelp', 'cuacahelp'])) {
+        const bmkgMenu = formatBmkgMenuText(prefix);
+        await this.sock.sendMessage(remoteJid, { text: bmkgMenu }, { quoted: msg });
+        this.addLog({
+          feature_key: 'bmkg_monitor',
+          feature_name: 'Pantauan BMKG & Bencana',
+          command: cleanText,
+          sender_masked: maskedSender,
+          status: 'success',
+          execution_time_ms: 15,
+          detail: 'Menu panduan pantauan BMKG & bencana dikirimkan.',
+        });
+        return;
+      }
+
+      // 8.2 Gempa Terkini M 5.0+ / Dirasakan + Shakemap
+      if (matchTrigger(['gempa', 'autogempa', 'gempaterkini', 'gempanow'])) {
+        const startTime = Date.now();
+        try {
+          await this.sock.sendMessage(remoteJid, { react: { text: '⏳', key: msg.key } });
+        } catch {}
+
+        try {
+          const { data: gempa, imageBuffer } = await getLatestEarthquake();
+          const caption = formatEarthquakeText(gempa, false);
+
+          if (imageBuffer) {
+            await this.sock.sendMessage(
+              remoteJid,
+              {
+                image: imageBuffer,
+                caption,
+              },
+              { quoted: msg }
+            );
+          } else {
+            await this.sock.sendMessage(remoteJid, { text: caption }, { quoted: msg });
+          }
+
+          try {
+            await this.sock.sendMessage(remoteJid, { react: { text: '✅', key: msg.key } });
+          } catch {}
+
+          this.commandsCountToday++;
+          this.addLog({
+            feature_key: 'bmkg_monitor',
+            feature_name: 'Pantauan BMKG & Bencana',
+            command: cleanText,
+            sender_masked: maskedSender,
+            status: 'success',
+            execution_time_ms: Date.now() - startTime,
+            detail: `Gempa terkini M ${gempa.Magnitude} (${gempa.Wilayah}) dikirim beserta shakemap.`,
+          });
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : 'Gagal mengambil data gempa BMKG.';
+          try {
+            await this.sock.sendMessage(remoteJid, { react: { text: '❌', key: msg.key } });
+          } catch {}
+          await this.sock.sendMessage(
+            remoteJid,
+            { text: `❌ Terjadi kendala saat mengakses server BMKG: ${errMsg}` },
+            { quoted: msg }
+          );
+        }
+        return;
+      }
+
+      // 8.3 15 Gempa M 5.0+ Terkini
+      if (matchTrigger(['gempa5m', 'gempabesar', 'listgempa', 'gempa5'])) {
+        const startTime = Date.now();
+        try {
+          await this.sock.sendMessage(remoteJid, { react: { text: '⏳', key: msg.key } });
+        } catch {}
+
+        try {
+          const list = await getRecentEarthquakes();
+          const txt = formatRecentEarthquakesText(list);
+          await this.sock.sendMessage(remoteJid, { text: txt }, { quoted: msg });
+          try {
+            await this.sock.sendMessage(remoteJid, { react: { text: '✅', key: msg.key } });
+          } catch {}
+
+          this.commandsCountToday++;
+          this.addLog({
+            feature_key: 'bmkg_monitor',
+            feature_name: 'Pantauan BMKG & Bencana',
+            command: cleanText,
+            sender_masked: maskedSender,
+            status: 'success',
+            execution_time_ms: Date.now() - startTime,
+            detail: `Daftar 10 gempa M 5.0+ dikirimkan ke pengguna.`,
+          });
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : 'Gagal mengambil daftar gempa BMKG.';
+          await this.sock.sendMessage(remoteJid, { text: `❌ Gagal: ${errMsg}` }, { quoted: msg });
+        }
+        return;
+      }
+
+      // 8.4 Gempa Dirasakan
+      if (matchTrigger(['dirasakan', 'gempadirasakan', 'gempammi'])) {
+        const startTime = Date.now();
+        try {
+          await this.sock.sendMessage(remoteJid, { react: { text: '⏳', key: msg.key } });
+        } catch {}
+
+        try {
+          const list = await getFeltEarthquakes();
+          const txt = formatFeltEarthquakesText(list);
+          await this.sock.sendMessage(remoteJid, { text: txt }, { quoted: msg });
+          try {
+            await this.sock.sendMessage(remoteJid, { react: { text: '✅', key: msg.key } });
+          } catch {}
+
+          this.commandsCountToday++;
+          this.addLog({
+            feature_key: 'bmkg_monitor',
+            feature_name: 'Pantauan BMKG & Bencana',
+            command: cleanText,
+            sender_masked: maskedSender,
+            status: 'success',
+            execution_time_ms: Date.now() - startTime,
+            detail: `Daftar 10 gempa dirasakan dikirimkan ke pengguna.`,
+          });
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : 'Gagal mengambil data gempa dirasakan.';
+          await this.sock.sendMessage(remoteJid, { text: `❌ Gagal: ${errMsg}` }, { quoted: msg });
+        }
+        return;
+      }
+
+      // 8.5 Prakiraan Cuaca
+      if (matchTrigger(['cuaca', 'weather', 'prakiraancuaca'])) {
+        const startTime = Date.now();
+        let targetLocation = cleanText.replace(/^[!/.]?(cuaca|weather|prakiraancuaca)\s*/i, '').trim();
+        if (!targetLocation) {
+          targetLocation = bmkgFeat.extra_settings?.default_weather_city || 'Jakarta';
+        }
+
+        try {
+          await this.sock.sendMessage(remoteJid, { react: { text: '⏳', key: msg.key } });
+        } catch {}
+
+        try {
+          const forecast = await getWeatherForecast(targetLocation);
+          const txt = formatWeatherText(forecast);
+          await this.sock.sendMessage(remoteJid, { text: txt }, { quoted: msg });
+          try {
+            await this.sock.sendMessage(remoteJid, { react: { text: '✅', key: msg.key } });
+          } catch {}
+
+          this.commandsCountToday++;
+          this.addLog({
+            feature_key: 'bmkg_monitor',
+            feature_name: 'Pantauan BMKG & Bencana',
+            command: cleanText,
+            sender_masked: maskedSender,
+            status: 'success',
+            execution_time_ms: Date.now() - startTime,
+            detail: `Prakiraan cuaca ${forecast.locationName} (${forecast.current.condition}, ${forecast.current.tempC}°C) dikirim.`,
+          });
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : 'Gagal mencari ramalan cuaca daerah tersebut.';
+          try {
+            await this.sock.sendMessage(remoteJid, { react: { text: '❌', key: msg.key } });
+          } catch {}
+          await this.sock.sendMessage(
+            remoteJid,
+            { text: `⚠️ ${errMsg}\n\n_Contoh: \`${prefix}cuaca Bandung\` atau \`${prefix}cuaca Surabaya\`_` },
+            { quoted: msg }
+          );
+        }
+        return;
+      }
+
+      // 8.6 Citra Satelit Cuaca Himawari-9
+      if (matchTrigger(['satelit', 'citrasatelit', 'satelithujan'])) {
+        const startTime = Date.now();
+        const param = cleanText.replace(/^[!/.]?(satelit|citrasatelit|satelithujan)\s*/i, '').trim().toLowerCase();
+        const satType = param.includes('hujan') || lower.includes('satelithujan') ? 'hujan' : param.includes('hotspot') ? 'hotspot' : 'awan';
+
+        try {
+          await this.sock.sendMessage(remoteJid, { react: { text: '⏳', key: msg.key } });
+        } catch {}
+
+        try {
+          const sat = await getSatelliteImage(satType);
+          await this.sock.sendMessage(
+            remoteJid,
+            {
+              image: sat.buffer,
+              caption: sat.caption,
+            },
+            { quoted: msg }
+          );
+          try {
+            await this.sock.sendMessage(remoteJid, { react: { text: '✅', key: msg.key } });
+          } catch {}
+
+          this.commandsCountToday++;
+          this.addLog({
+            feature_key: 'bmkg_monitor',
+            feature_name: 'Pantauan BMKG & Bencana',
+            command: cleanText,
+            sender_masked: maskedSender,
+            status: 'success',
+            execution_time_ms: Date.now() - startTime,
+            detail: `Citra satelit Himawari-9 (${satType}) dikirimkan ke pengguna.`,
+          });
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : 'Gagal mengunduh citra satelit BMKG.';
+          await this.sock.sendMessage(remoteJid, { text: `❌ ${errMsg}` }, { quoted: msg });
+        }
+        return;
+      }
+
+      // 8.7 Pantauan Hotspot Karhutla
+      if (matchTrigger(['hotspot', 'karhutla', 'titikpanas', 'kebakaran'])) {
+        const startTime = Date.now();
+        try {
+          await this.sock.sendMessage(remoteJid, { react: { text: '⏳', key: msg.key } });
+        } catch {}
+
+        try {
+          const sat = await getSatelliteImage('hotspot');
+          await this.sock.sendMessage(
+            remoteJid,
+            {
+              image: sat.buffer,
+              caption: sat.caption,
+            },
+            { quoted: msg }
+          );
+          try {
+            await this.sock.sendMessage(remoteJid, { react: { text: '✅', key: msg.key } });
+          } catch {}
+
+          this.commandsCountToday++;
+          this.addLog({
+            feature_key: 'bmkg_monitor',
+            feature_name: 'Pantauan BMKG & Bencana',
+            command: cleanText,
+            sender_masked: maskedSender,
+            status: 'success',
+            execution_time_ms: Date.now() - startTime,
+            detail: `Peta sebaran titik panas hotspot karhutla BMKG dikirimkan.`,
+          });
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : 'Gagal mengambil peta hotspot BMKG.';
+          await this.sock.sendMessage(remoteJid, { text: `❌ ${errMsg}` }, { quoted: msg });
+        }
+        return;
+      }
+
+      // 8.8 Peringatan Cuaca Maritim & Gelombang Tinggi
+      if (matchTrigger(['gelombang', 'maritim', 'cuacalaut', 'ombak'])) {
+        const startTime = Date.now();
+        const regionFilter = cleanText.replace(/^[!/.]?(gelombang|maritim|cuacalaut|ombak)\s*/i, '').trim();
+
+        try {
+          await this.sock.sendMessage(remoteJid, { react: { text: '⏳', key: msg.key } });
+        } catch {}
+
+        try {
+          const maritimeData = await getMaritimeWarnings(regionFilter || undefined);
+          const txt = formatMaritimeText(maritimeData);
+          await this.sock.sendMessage(remoteJid, { text: txt }, { quoted: msg });
+          try {
+            await this.sock.sendMessage(remoteJid, { react: { text: '✅', key: msg.key } });
+          } catch {}
+
+          this.commandsCountToday++;
+          this.addLog({
+            feature_key: 'bmkg_monitor',
+            feature_name: 'Pantauan BMKG & Bencana',
+            command: cleanText,
+            sender_masked: maskedSender,
+            status: 'success',
+            execution_time_ms: Date.now() - startTime,
+            detail: `Peringatan dini gelombang maritim BMKG dikirimkan.`,
+          });
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : 'Gagal mengambil data maritim BMKG.';
+          await this.sock.sendMessage(remoteJid, { text: `❌ ${errMsg}` }, { quoted: msg });
+        }
+        return;
+      }
+
+      // 8.9 Kualitas Udara (PM2.5 & AQI)
+      if (matchTrigger(['udara', 'aqi', 'polusi', 'pm25'])) {
+        const startTime = Date.now();
+        let targetCity = cleanText.replace(/^[!/.]?(udara|aqi|polusi|pm25)\s*/i, '').trim();
+        if (!targetCity) targetCity = 'Jakarta';
+
+        try {
+          await this.sock.sendMessage(remoteJid, { react: { text: '⏳', key: msg.key } });
+        } catch {}
+
+        try {
+          const aq = await getAirQuality(targetCity);
+          const txt = formatAirQualityText(aq);
+          await this.sock.sendMessage(remoteJid, { text: txt }, { quoted: msg });
+          try {
+            await this.sock.sendMessage(remoteJid, { react: { text: '✅', key: msg.key } });
+          } catch {}
+
+          this.commandsCountToday++;
+          this.addLog({
+            feature_key: 'bmkg_monitor',
+            feature_name: 'Pantauan BMKG & Bencana',
+            command: cleanText,
+            sender_masked: maskedSender,
+            status: 'success',
+            execution_time_ms: Date.now() - startTime,
+            detail: `Data kualitas udara ${aq.location} (AQI ${aq.aqi} - ${aq.status}) dikirimkan.`,
+          });
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : 'Gagal memeriksa kualitas udara.';
+          await this.sock.sendMessage(remoteJid, { text: `⚠️ ${errMsg}` }, { quoted: msg });
+        }
+        return;
+      }
+    }
+  }
+
+  // Background watcher peringatan gempa BMKG
+  private startBmkgEarthquakeWatcher() {
+    if (this.bmkgWatcherInterval) clearInterval(this.bmkgWatcherInterval);
+    this.bmkgWatcherInterval = setInterval(async () => {
+      try {
+        const bmkgFeat = this.features.find((f) => f.feature_key === 'bmkg_monitor');
+        if (!bmkgFeat || !bmkgFeat.is_enabled || !bmkgFeat.extra_settings?.bmkg_auto_alert) {
+          return;
+        }
+
+        const minMag = Number(bmkgFeat.extra_settings.bmkg_min_magnitude) || 5.0;
+        const recipients = bmkgFeat.extra_settings.bmkg_alert_recipients || [];
+        if (recipients.length === 0 || !this.sock) return;
+
+        const { data: gempa, imageBuffer } = await getLatestEarthquake();
+        const eventId = `${gempa.DateTime}_${gempa.Magnitude}_${gempa.Coordinates}`;
+
+        if (!this.lastKnownEarthquakeId) {
+          this.lastKnownEarthquakeId = eventId;
+          return;
+        }
+
+        if (eventId !== this.lastKnownEarthquakeId) {
+          this.lastKnownEarthquakeId = eventId;
+          const magNum = parseFloat(gempa.Magnitude);
+
+          if (magNum >= minMag) {
+            const alertText = formatEarthquakeText(gempa, true);
+            for (const recipient of recipients) {
+              const cleanJid = recipient.includes('@') ? recipient : `${recipient}@s.whatsapp.net`;
+              try {
+                if (imageBuffer) {
+                  await this.sock.sendMessage(cleanJid, {
+                    image: imageBuffer,
+                    caption: alertText,
+                  });
+                } else {
+                  await this.sock.sendMessage(cleanJid, { text: alertText });
+                }
+              } catch (e) {
+                console.warn(`[BMKG Auto-Alert] Gagal mengirim ke ${cleanJid}:`, e);
+              }
+            }
+
+            this.addLog({
+              feature_key: 'bmkg_monitor',
+              feature_name: 'Pantauan BMKG & Bencana',
+              command: '[AUTO-ALERT] Gempa Bumi M ' + gempa.Magnitude,
+              sender_masked: 'BMKG TEWS Broadcast',
+              status: 'success',
+              execution_time_ms: 100,
+              detail: `Peringatan gempa otomatis dikirim ke ${recipients.length} penerima: ${gempa.Wilayah}`,
+            });
+          }
+        }
+      } catch {
+        // Silently catch poll errors
+      }
+    }, 60000);
   }
 
   // Disconnect & logout session
   public async disconnect() {
+    if (this.bmkgWatcherInterval) {
+      clearInterval(this.bmkgWatcherInterval);
+      this.bmkgWatcherInterval = null;
+    }
     if (this.sock) {
       try {
         await this.sock.logout();

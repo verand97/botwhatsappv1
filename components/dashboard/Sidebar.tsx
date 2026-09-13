@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   QrCode,
   Sliders,
+  Activity,
   ScrollText,
   BarChart3,
   ShieldAlert,
@@ -49,6 +50,16 @@ export default function Sidebar() {
       badge: (
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-circuit-500/20 text-circuit-400 font-mono font-medium">
           {activeCount} Aktif
+        </span>
+      ),
+    },
+    {
+      href: '/dashboard/bmkg',
+      label: 'Pantauan BMKG & Bencana',
+      icon: Activity,
+      badge: (
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-alert-500/20 text-alert-400 font-mono font-medium">
+          LIVE
         </span>
       ),
     },

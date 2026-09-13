@@ -17,6 +17,7 @@ import {
   Settings2,
   Check,
   Zap,
+  Activity,
 } from 'lucide-react';
 
 const ICON_MAP: Record<string, React.ElementType> = {
@@ -26,6 +27,7 @@ const ICON_MAP: Record<string, React.ElementType> = {
   auto_reply: MessageSquareReply,
   group_tools: Users,
   ai_chat: Bot,
+  bmkg_monitor: Activity,
   tts_converter: Volume2,
   text_games: Gamepad2,
 };
@@ -40,6 +42,11 @@ export default function ModuleCard({ feature }: ModuleCardProps) {
   const [triggerInput, setTriggerInput] = useState(feature.command_trigger);
   const [packName, setPackName] = useState(feature.extra_settings.pack_name || '');
   const [authorName, setAuthorName] = useState(feature.extra_settings.author_name || '');
+  const [bmkgAutoAlert, setBmkgAutoAlert] = useState(Boolean(feature.extra_settings.bmkg_auto_alert));
+  const [bmkgRecipients, setBmkgRecipients] = useState(
+    (feature.extra_settings.bmkg_alert_recipients || []).join(', ')
+  );
+  const [defaultCity, setDefaultCity] = useState(feature.extra_settings.default_weather_city || 'Jakarta');
   const [saveToast, setSaveToast] = useState(false);
 
   const IconComponent = ICON_MAP[feature.feature_key] || Zap;
@@ -50,6 +57,12 @@ export default function ModuleCard({ feature }: ModuleCardProps) {
     updateFeatureSettings(feature.id, {
       pack_name: packName,
       author_name: authorName,
+      bmkg_auto_alert: bmkgAutoAlert,
+      bmkg_alert_recipients: bmkgRecipients
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      default_weather_city: defaultCity,
     });
     setSaveToast(true);
     setTimeout(() => setSaveToast(false), 2000);
@@ -257,6 +270,54 @@ export default function ModuleCard({ feature }: ModuleCardProps) {
                   defaultValue={feature.extra_settings.ai_system_prompt}
                   className="w-full px-3 py-1.5 rounded-lg bg-panel-800 border border-panel-700 text-white focus:border-circuit-500 focus:outline-none"
                 />
+              </div>
+            )}
+
+            {/* BMKG Monitor Specific Settings */}
+            {feature.feature_key === 'bmkg_monitor' && (
+              <div className="space-y-3 p-3 rounded-lg bg-panel-800/80 border border-panel-700">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-semibold text-white text-xs">Peringatan Gempa Otomatis (Auto-Alert)</div>
+                    <div className="text-[11px] text-gray-400">Broadcast gempa baru M ≥ 5.0 ke WhatsApp secara otomatis</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={bmkgAutoAlert}
+                    onChange={(e) => setBmkgAutoAlert(e.target.checked)}
+                    className="w-4 h-4 rounded text-circuit-500 accent-circuit-500 cursor-pointer"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-gray-400 font-mono text-[11px] mb-1">
+                    Nomor WhatsApp / ID Grup Penerima Broadcast (pisahkan koma)
+                  </label>
+                  <input
+                    type="text"
+                    value={bmkgRecipients}
+                    onChange={(e) => setBmkgRecipients(e.target.value)}
+                    placeholder="mis. 6281234567890, 12036302482390@g.us"
+                    className="w-full px-3 py-1.5 rounded-lg bg-panel-800 border border-panel-700 text-white font-mono focus:border-circuit-500 focus:outline-none text-[11px]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-gray-400 font-mono text-[11px] mb-1">
+                    Kota Default Ramalan Cuaca
+                  </label>
+                  <input
+                    type="text"
+                    value={defaultCity}
+                    onChange={(e) => setDefaultCity(e.target.value)}
+                    placeholder="Jakarta"
+                    className="w-full px-3 py-1.5 rounded-lg bg-panel-800 border border-panel-700 text-white focus:border-circuit-500 focus:outline-none text-xs"
+                  />
+                </div>
+
+                <div className="text-[11px] text-gray-400">
+                  ⚡ Hubungkan langsung dengan server open data BMKG TEWS, MEWS, dan Satelit Himawari-9.
+                </div>
               </div>
             )}
 
