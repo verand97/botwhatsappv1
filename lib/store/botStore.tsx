@@ -533,6 +533,46 @@ export function BotProvider({ children }: { children: React.ReactNode }) {
         };
       }
 
+      const isYouTube = url.includes('youtu');
+      const resMatch = lower.match(/\b(1080p?|720p?|480p?|360p?|fhd|hd|sd)\b/i);
+      let simulatedRes = '720';
+      if (resMatch) {
+        const raw = resMatch[1].toLowerCase();
+        if (raw.includes('1080') || raw === 'fhd') simulatedRes = '1080';
+        else if (raw.includes('480') || raw === 'sd') simulatedRes = '480';
+        else if (raw.includes('360')) simulatedRes = '360';
+        else simulatedRes = '720';
+      }
+
+      if (isYouTube && !isAudio && !resMatch) {
+        return {
+          response:
+            `🎬 *PILIH RESOLUSI YOUTUBE*\n\n` +
+            `📌 *Judul:* Rick Astley - Never Gonna Give You Up\n` +
+            `👤 *Channel:* Rick Astley\n` +
+            `⏱️ *Durasi:* 03:33\n\n` +
+            `Silakan balas (reply) pesan ini atau ketik pilihan Anda:\n` +
+            `1️⃣ *480p* (Hemat Kuota / Cepat) ➔ balas 1 atau 480\n` +
+            `2️⃣ *720p* (HD - Standar Rekomendasi) ➔ balas 2 atau 720\n` +
+            `3️⃣ *1080p* (Full HD Jernih) ➔ balas 3 atau 1080\n` +
+            `🎵 *Audio MP3* (Hanya Suara) ➔ balas mp3\n\n` +
+            `_Tips: Bisa juga langsung: ${prefix}yt <link> 720 atau ${prefix}yt <link> 1080_`,
+          success: true,
+        };
+      }
+
+      if (isYouTube) {
+        return {
+          response:
+            `✅ [Simulasi Media Downloader Sukses]\n` +
+            `🎬 *Platform:* ${isAudio ? 'YouTube Audio (MP3)' : `YouTube Video MP4 (${simulatedRes}p)`}\n` +
+            `🔗 *Tautan:* ${url}\n` +
+            (isAudio ? '' : `📐 *Resolusi:* ${simulatedRes}p\n`) +
+            `📦 *Status:* Berhasil diekstrak dengan kualitas ${isAudio ? 'audio jernih 128kbps' : simulatedRes + 'p'} dan siap dikirim ke WhatsApp.`,
+          success: true,
+        };
+      }
+
       if (isTikTok) {
         return {
           response:

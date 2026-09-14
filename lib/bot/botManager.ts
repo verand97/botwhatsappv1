@@ -13,7 +13,14 @@ import path from 'path';
 import fs from 'fs';
 import pino from 'pino';
 import { addExifToWebp } from './exif';
-import { downloadMediaFromUrl, parseSlideRequest, downloadMediaBuffer, detectPlatform } from './mediaDownloader';
+import {
+  downloadMediaFromUrl,
+  parseSlideRequest,
+  downloadMediaBuffer,
+  detectPlatform,
+  getYouTubeInfo,
+  VideoResolution,
+} from './mediaDownloader';
 import { generateMenuText, generateFaqText } from './menuHelper';
 import {
   getLatestEarthquake,
@@ -165,12 +172,24 @@ const DEFAULT_RATE_LIMIT: RateLimitConfig = {
   whitelisted_groups: [],
 };
 
+interface PendingYouTubeRequest {
+  url: string;
+  sender: string;
+  remoteJid: string;
+  title: string;
+  author: string;
+  duration: string;
+  thumbnail: string;
+  createdAt: number;
+}
+
 class BotManager {
   private sock: WASocket | null = null;
   private status: BotConnectionStatus = 'disconnected';
   private qrRaw: string | null = null;
   private qrDataUrl: string | null = null;
   private nomorWa: string | null = null;
+  private pendingYouTubeMap = new Map<string, PendingYouTubeRequest>();
   private pushName: string | null = null;
   private connectedAt: string | null = null;
   private logs: ActivityLog[] = [];
@@ -793,6 +812,203 @@ class BotManager {
     }
   }
 
+  /**
+   * Execute media download and deliver payload (video, audio, or slides) to WhatsApp
+   */
+  private async executeMediaDownload(
+    targetUrl: string,
+    remoteJid: string,
+    msg: WAMessage,
+    cleanText: string,
+    maskedSender: string,
+    options: {
+      isAudioOnly?: boolean;
+      slideIndices?: number[];
+      resolution?: VideoResolution;
+    } = {}
+  ): Promise<void> {
+    if (!this.sock) return;
+    const startTime = Date.now();
+
+    // Send wait reaction
+    try {
+      await this.sock.sendMessage(remoteJid, {
+        react: { text: '⏳', key: msg.key },
+      });
+    } catch {}
+
+    try {
+      const result = await downloadMediaFromUrl(targetUrl, options);
+
+      if (!result.success) {
+        try {
+          await this.sock.sendMessage(remoteJid, {
+            react: { text: '❌', key: msg.key },
+          });
+        } catch {}
+
+        const failMsg = `❌ *Gagal Mengunduh Media*\n\n${result.error || 'Media tidak dapat diakses atau dibatasi.'}`;
+        await this.sock.sendMessage(remoteJid, { text: failMsg }, { quoted: msg });
+
+        this.addLog({
+          feature_key: 'downloader',
+          feature_name: 'Media Downloader',
+          command: cleanText,
+          sender_masked: maskedSender,
+          status: 'failed',
+          execution_time_ms: Date.now() - startTime,
+          detail: `Downloader failed: ${result.error}`,
+        });
+        return;
+      }
+
+      // Send media according to media type
+      if (result.type === 'video') {
+        if (result.buffer) {
+          // Large video (> 55MB) sent as document MP4 to prevent WhatsApp stream drop/rejection
+          const isLarge = result.buffer.length > 55 * 1024 * 1024;
+          if (isLarge) {
+            const rawTitle = (result.title || 'video').replace(/[/\\?%*:|"<>]/g, '_').slice(0, 50);
+            const fileName = `${rawTitle}_${result.resolution || 'video'}.mp4`;
+            await this.sock.sendMessage(
+              remoteJid,
+              {
+                document: result.buffer,
+                mimetype: 'video/mp4',
+                fileName,
+                caption: `${result.caption}\n\n📁 _Dikirim sebagai dokumen MP4 karena ukuran file besar (> 55 MB) agar kualitas Full HD terjaga._`,
+              },
+              { quoted: msg }
+            );
+          } else {
+            await this.sock.sendMessage(
+              remoteJid,
+              {
+                video: result.buffer,
+                mimetype: 'video/mp4',
+                caption: result.caption,
+              },
+              { quoted: msg }
+            );
+          }
+        } else if (result.mediaUrl) {
+          await this.sock.sendMessage(
+            remoteJid,
+            {
+              video: { url: result.mediaUrl },
+              mimetype: 'video/mp4',
+              caption: result.caption,
+            },
+            { quoted: msg }
+          );
+        }
+      } else if (result.type === 'audio') {
+        if (result.buffer) {
+          await this.sock.sendMessage(
+            remoteJid,
+            {
+              audio: result.buffer,
+              mimetype: 'audio/mp4',
+              ptt: false,
+            },
+            { quoted: msg }
+          );
+        } else if (result.mediaUrl) {
+          await this.sock.sendMessage(
+            remoteJid,
+            {
+              audio: { url: result.mediaUrl },
+              mimetype: 'audio/mp4',
+              ptt: false,
+            },
+            { quoted: msg }
+          );
+        }
+      } else if (result.type === 'images' && result.images && result.images.length > 0) {
+        const totalImgs = result.images.length;
+        const totalSlides = result.totalSlides || totalImgs;
+        const selectedIndices = result.selectedSlideIndices || result.images.map((_, i) => i + 1);
+
+        for (let i = 0; i < totalImgs; i++) {
+          const isFirst = i === 0;
+          const imgUrl = result.images[i];
+          const slideNum = selectedIndices[i] || i + 1;
+
+          let slideCaption = '';
+          if (totalImgs === 1) {
+            slideCaption = result.caption || `📸 Slide ${slideNum} dari ${totalSlides}`;
+          } else if (isFirst) {
+            slideCaption = `${result.caption}\n\n🖼️ *[1/${totalImgs}] Slide ${slideNum} dari ${totalSlides}*`;
+          } else {
+            slideCaption = `🖼️ *[${i + 1}/${totalImgs}] Slide ${slideNum} dari ${totalSlides}*`;
+          }
+
+          // Safely download buffer to avoid CDN 403 Forbidden
+          const imgBuffer = await downloadMediaBuffer(imgUrl, 20 * 1024 * 1024);
+          const mediaContent = imgBuffer ? { image: imgBuffer } : { image: { url: imgUrl } };
+
+          await this.sock.sendMessage(
+            remoteJid,
+            {
+              ...mediaContent,
+              caption: slideCaption,
+            },
+            { quoted: isFirst ? msg : undefined }
+          );
+
+          if (i < totalImgs - 1) {
+            await new Promise((r) => setTimeout(r, 650));
+          }
+        }
+      }
+
+      // Success reaction
+      try {
+        await this.sock.sendMessage(remoteJid, {
+          react: { text: '✅', key: msg.key },
+        });
+      } catch {}
+
+      this.mediaDownloadedToday++;
+      this.commandsCountToday++;
+      this.addLog({
+        feature_key: 'downloader',
+        feature_name: 'Media Downloader',
+        command: cleanText,
+        sender_masked: maskedSender,
+        status: 'success',
+        execution_time_ms: Date.now() - startTime,
+        detail: `Berhasil mengunduh ${result.platform} (${result.type}${result.resolution ? ' - ' + result.resolution + 'p' : ''})`,
+      });
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Gagal mengirim media.';
+      console.error('[BOT DOWNLOADER ERROR]', err);
+      try {
+        await this.sock.sendMessage(remoteJid, {
+          react: { text: '❌', key: msg.key },
+        });
+      } catch {}
+
+      await this.sock.sendMessage(
+        remoteJid,
+        {
+          text: `❌ Terjadi kesalahan saat memproses unduhan: ${errorMsg}`,
+        },
+        { quoted: msg }
+      );
+
+      this.addLog({
+        feature_key: 'downloader',
+        feature_name: 'Media Downloader',
+        command: cleanText,
+        sender_masked: maskedSender,
+        status: 'failed',
+        execution_time_ms: Date.now() - startTime,
+        detail: `Error sending media: ${errorMsg}`,
+      });
+    }
+  }
+
   // Real WhatsApp message handler
   private async handleIncomingMessage(msg: WAMessage) {
     if (!this.sock || !msg || !msg.key) return;
@@ -800,7 +1016,7 @@ class BotManager {
     const remoteJid = msg.key.remoteJid;
     if (!remoteJid || remoteJid === 'status@broadcast') return;
 
-    const senderRaw = remoteJid.split('@')[0];
+    const senderRaw = (msg.key.participant || remoteJid).split('@')[0];
     const maskedSender =
       senderRaw.length > 7
         ? senderRaw.slice(0, 5) + '***' + senderRaw.slice(-3)
@@ -845,6 +1061,67 @@ class BotManager {
 
     this.userLastCommandMap.set(remoteJid, now);
     this.commandsCountToday++;
+
+    // Check for pending YouTube resolution selection reply
+    const pendingKey = `${remoteJid}:${senderRaw}`;
+    const pendingYt = this.pendingYouTubeMap.get(pendingKey);
+    if (pendingYt) {
+      const isExpired = Date.now() - pendingYt.createdAt > 3 * 60 * 1000;
+      if (isExpired) {
+        this.pendingYouTubeMap.delete(pendingKey);
+      } else {
+        const choice = cleanText.trim().toLowerCase();
+        let selectedRes: VideoResolution | null = null;
+        let isAudioOnly = false;
+        let isCancelled = false;
+
+        if (choice === '1' || choice === '480' || choice === '480p') {
+          selectedRes = '480';
+        } else if (choice === '2' || choice === '720' || choice === '720p') {
+          selectedRes = '720';
+        } else if (choice === '3' || choice === '1080' || choice === '1080p') {
+          selectedRes = '1080';
+        } else if (choice === '4' || choice === 'mp3' || choice === 'audio') {
+          isAudioOnly = true;
+        } else if (choice === 'batal' || choice === 'cancel') {
+          isCancelled = true;
+        }
+
+        if (isCancelled) {
+          this.pendingYouTubeMap.delete(pendingKey);
+          await this.sock.sendMessage(
+            remoteJid,
+            { text: '❌ Pilihan unduhan YouTube telah dibatalkan.' },
+            { quoted: msg }
+          );
+          return;
+        } else if (selectedRes || isAudioOnly) {
+          this.pendingYouTubeMap.delete(pendingKey);
+          await this.executeMediaDownload(
+            pendingYt.url,
+            remoteJid,
+            msg,
+            cleanText,
+            maskedSender,
+            {
+              isAudioOnly,
+              resolution: selectedRes || undefined,
+            }
+          );
+          return;
+        } else {
+          // If the message is a new command, clear the pending session
+          if (
+            cleanText.startsWith(prefix) ||
+            cleanText.startsWith('!') ||
+            cleanText.startsWith('/') ||
+            cleanText.startsWith('.')
+          ) {
+            this.pendingYouTubeMap.delete(pendingKey);
+          }
+        }
+      }
+    }
 
     // 2. Sticker Maker (§5.1)
     const stickerFeat = this.features.find((f) => f.feature_key === 'sticker_maker');
@@ -1119,7 +1396,7 @@ class BotManager {
           `*Perintah Cepat:*\n` +
           `• *${prefix}tt <url> [slide]* : Unduh video/audio/slide TikTok tanpa watermark\n` +
           `• *${prefix}ig <url> [slide]* : Unduh video Reels / carousel foto Instagram\n` +
-          `• *${prefix}yt <url>* : Unduh video YouTube (MP4)\n` +
+          `• *${prefix}yt <url> [480|720|1080]* : Unduh video YouTube (pilihan 480p, 720p, 1080p)\n` +
           `• *${prefix}ytmp3 <url>* : Unduh audio YouTube (MP3)\n` +
           `• *${prefix}fb <url>* : Unduh video Facebook HD/SD\n` +
           `• *${prefix}twitter <url>* : Unduh video Twitter/X\n\n` +
@@ -1131,6 +1408,7 @@ class BotManager {
 
       const targetUrl = parsedReq.url;
       const slideIndices = parsedReq.slideIndices;
+      const explicitResolution = parsedReq.resolution;
       const textWithoutUrl = cleanText.replace(targetUrl, '').trim().toLowerCase();
       const isAudioOnly =
         textWithoutUrl.includes('ytmp3') ||
@@ -1141,168 +1419,85 @@ class BotManager {
         textWithoutUrl.includes('audio') ||
         textWithoutUrl.includes('mp3');
 
-      const startTime = Date.now();
+      const isYouTube = detectPlatform(targetUrl) === 'youtube';
 
-      // Send wait reaction
-      try {
-        await this.sock.sendMessage(remoteJid, {
-          react: { text: '⏳', key: msg.key },
+      // If YouTube video mode (not audio only) and user hasn't explicitly specified resolution:
+      if (isYouTube && !isAudioOnly && !explicitResolution) {
+        const ytInfo = await getYouTubeInfo(targetUrl);
+        const title = ytInfo?.title || 'YouTube Video';
+        const author = ytInfo?.author || 'YouTube Creator';
+        const durationText = ytInfo?.duration ? `⏱️ *Durasi:* ${ytInfo.duration}\n` : '';
+        const thumbnail = ytInfo?.thumbnail || '';
+
+        const selectionText =
+          `🎬 *PILIH RESOLUSI YOUTUBE*\n\n` +
+          `📌 *Judul:* ${title.slice(0, 100)}\n` +
+          `👤 *Channel:* ${author}\n` +
+          durationText +
+          `\n` +
+          `Silakan balas (reply) pesan ini atau ketik pilihan Anda:\n` +
+          `1️⃣ *480p* (Hemat Kuota / Cepat) ➔ balas *1* atau *480*\n` +
+          `2️⃣ *720p* (HD - Standar Rekomendasi) ➔ balas *2* atau *720*\n` +
+          `3️⃣ *1080p* (Full HD Jernih) ➔ balas *3* atau *1080*\n` +
+          `🎵 *Audio MP3* (Hanya Suara) ➔ balas *mp3* atau *audio*\n\n` +
+          `_Ketik *batal* untuk membatalkan (berlaku 3 menit)._\n` +
+          `_Tips: Anda juga bisa langsung: \`${prefix}yt <link> 720\` atau \`${prefix}yt <link> 1080\`_`;
+
+        // Save pending request for this user / chat
+        const pendingKey = `${remoteJid}:${senderRaw}`;
+        this.pendingYouTubeMap.set(pendingKey, {
+          url: targetUrl,
+          sender: senderRaw,
+          remoteJid,
+          title,
+          author,
+          duration: ytInfo?.duration || '',
+          thumbnail,
+          createdAt: Date.now(),
         });
-      } catch {}
 
-      try {
-        const result = await downloadMediaFromUrl(targetUrl, { isAudioOnly, slideIndices });
-
-        if (!result.success) {
+        // Try sending with thumbnail image if available
+        let sentWithThumbnail = false;
+        if (thumbnail && thumbnail.startsWith('http')) {
           try {
-            await this.sock.sendMessage(remoteJid, {
-              react: { text: '❌', key: msg.key },
-            });
+            const thumbBuffer = await downloadMediaBuffer(thumbnail, 5 * 1024 * 1024, 7000);
+            if (thumbBuffer) {
+              await this.sock.sendMessage(
+                remoteJid,
+                { image: thumbBuffer, caption: selectionText },
+                { quoted: msg }
+              );
+              sentWithThumbnail = true;
+            }
           } catch {}
-
-          const failMsg = `❌ *Gagal Mengunduh Media*\n\n${result.error || 'Media tidak dapat diakses atau dibatasi.'}`;
-          await this.sock.sendMessage(remoteJid, { text: failMsg }, { quoted: msg });
-
-          this.addLog({
-            feature_key: 'downloader',
-            feature_name: 'Media Downloader',
-            command: cleanText,
-            sender_masked: maskedSender,
-            status: 'failed',
-            execution_time_ms: Date.now() - startTime,
-            detail: `Downloader failed: ${result.error}`,
-          });
-          return;
         }
 
-        // Send media according to media type
-        if (result.type === 'video') {
-          if (result.buffer) {
-            await this.sock.sendMessage(
-              remoteJid,
-              {
-                video: result.buffer,
-                mimetype: 'video/mp4',
-                caption: result.caption,
-              },
-              { quoted: msg }
-            );
-          } else if (result.mediaUrl) {
-            await this.sock.sendMessage(
-              remoteJid,
-              {
-                video: { url: result.mediaUrl },
-                mimetype: 'video/mp4',
-                caption: result.caption,
-              },
-              { quoted: msg }
-            );
-          }
-        } else if (result.type === 'audio') {
-          if (result.buffer) {
-            await this.sock.sendMessage(
-              remoteJid,
-              {
-                audio: result.buffer,
-                mimetype: 'audio/mp4',
-                ptt: false,
-              },
-              { quoted: msg }
-            );
-          } else if (result.mediaUrl) {
-            await this.sock.sendMessage(
-              remoteJid,
-              {
-                audio: { url: result.mediaUrl },
-                mimetype: 'audio/mp4',
-                ptt: false,
-              },
-              { quoted: msg }
-            );
-          }
-        } else if (result.type === 'images' && result.images && result.images.length > 0) {
-          const totalImgs = result.images.length;
-          const totalSlides = result.totalSlides || totalImgs;
-          const selectedIndices = result.selectedSlideIndices || result.images.map((_, i) => i + 1);
-
-          for (let i = 0; i < totalImgs; i++) {
-            const isFirst = i === 0;
-            const imgUrl = result.images[i];
-            const slideNum = selectedIndices[i] || i + 1;
-
-            let slideCaption = '';
-            if (totalImgs === 1) {
-              slideCaption = result.caption || `📸 Slide ${slideNum} dari ${totalSlides}`;
-            } else if (isFirst) {
-              slideCaption = `${result.caption}\n\n🖼️ *[1/${totalImgs}] Slide ${slideNum} dari ${totalSlides}*`;
-            } else {
-              slideCaption = `🖼️ *[${i + 1}/${totalImgs}] Slide ${slideNum} dari ${totalSlides}*`;
-            }
-
-            // Safely download buffer to avoid CDN 403 Forbidden
-            const imgBuffer = await downloadMediaBuffer(imgUrl, 20 * 1024 * 1024);
-            const mediaContent = imgBuffer ? { image: imgBuffer } : { image: { url: imgUrl } };
-
-            await this.sock.sendMessage(
-              remoteJid,
-              {
-                ...mediaContent,
-                caption: slideCaption,
-              },
-              { quoted: isFirst ? msg : undefined }
-            );
-
-            if (i < totalImgs - 1) {
-              await new Promise((r) => setTimeout(r, 650));
-            }
-          }
+        if (!sentWithThumbnail) {
+          await this.sock.sendMessage(
+            remoteJid,
+            { text: selectionText },
+            { quoted: msg }
+          );
         }
 
-        // Success reaction
-        try {
-          await this.sock.sendMessage(remoteJid, {
-            react: { text: '✅', key: msg.key },
-          });
-        } catch {}
-
-        this.mediaDownloadedToday++;
-        this.commandsCountToday++;
         this.addLog({
           feature_key: 'downloader',
           feature_name: 'Media Downloader',
           command: cleanText,
           sender_masked: maskedSender,
           status: 'success',
-          execution_time_ms: Date.now() - startTime,
-          detail: `Berhasil mengunduh ${result.platform} (${result.type})`,
+          execution_time_ms: 15,
+          detail: 'Menu pilihan resolusi YouTube dikirimkan ke pengguna.',
         });
-      } catch (err: unknown) {
-        const errorMsg = err instanceof Error ? err.message : 'Gagal mengirim media.';
-        console.error('[BOT DOWNLOADER ERROR]', err);
-        try {
-          await this.sock.sendMessage(remoteJid, {
-            react: { text: '❌', key: msg.key },
-          });
-        } catch {}
-
-        await this.sock.sendMessage(
-          remoteJid,
-          {
-            text: `❌ Terjadi kesalahan saat memproses unduhan: ${errorMsg}`,
-          },
-          { quoted: msg }
-        );
-
-        this.addLog({
-          feature_key: 'downloader',
-          feature_name: 'Media Downloader',
-          command: cleanText,
-          sender_masked: maskedSender,
-          status: 'failed',
-          execution_time_ms: Date.now() - startTime,
-          detail: `Downloader exception: ${errorMsg}`,
-        });
+        return;
       }
+
+      // If resolution is already specified, audio mode, or other platforms, download directly
+      await this.executeMediaDownload(targetUrl, remoteJid, msg, cleanText, maskedSender, {
+        isAudioOnly,
+        slideIndices,
+        resolution: explicitResolution || '720',
+      });
       return;
     }
 

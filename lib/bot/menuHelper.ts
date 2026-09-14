@@ -26,8 +26,9 @@ export function generateMenuText(prefix: string, features?: FeatureConfig[]): st
     items.push(
       `📥 *Media Downloader*\n` +
       `• \`${prefix}dl <link>\` : Unduh video/audio/slide (TikTok, IG, YT, FB, X)\n` +
-      `• \`${prefix}dl <link> 2\` : Unduh slide ke-2 saja\n` +
-      `• \`${prefix}dl <link> 1-3\` : Unduh slide rentang 1 sampai 3\n` +
+      `• \`${prefix}yt <link> [480|720|1080]\` : Unduh YouTube pilihan resolusi\n` +
+      `• \`${prefix}ytmp3 <link>\` : Unduh audio YouTube MP3\n` +
+      `• \`${prefix}dl <link> 2\` : Unduh slide ke-2 saja (TikTok/IG)\n` +
       `_Shortcut:_ \`${prefix}tt\`, \`${prefix}ig\`, \`${prefix}yt\`, \`${prefix}ytmp3\`, \`${prefix}fb\`, \`${prefix}twitter\``
     );
   }
@@ -115,7 +116,7 @@ export function generateFaqText(
     `• *Shortcut / Perintah Pintas:*\n` +
     `  ▫️ \`${prefix}tt <link> [slide]\` ➔ TikTok Video / Audio / Slide\n` +
     `  ▫️ \`${prefix}ig <link> [slide]\` ➔ Instagram Reels / Foto / Carousel\n` +
-    `  ▫️ \`${prefix}yt <link>\` ➔ YouTube Video (MP4)\n` +
+    `  ▫️ \`${prefix}yt <link> [480|720|1080]\` ➔ YouTube Video MP4 (pilihan resolusi / interaktif)\n` +
     `  ▫️ \`${prefix}ytmp3 <link>\` ➔ YouTube Audio (MP3)\n` +
     `  ▫️ \`${prefix}fb <link>\` ➔ Facebook Video HD\n` +
     `  ▫️ \`${prefix}twitter <link>\` ➔ Twitter/X Video\n\n` +

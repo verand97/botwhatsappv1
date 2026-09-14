@@ -20,6 +20,14 @@ const dylux = require('api-dylux');
 
 export type MediaPlatform = 'tiktok' | 'youtube' | 'instagram' | 'facebook' | 'twitter' | 'unknown';
 export type MediaType = 'video' | 'audio' | 'images' | 'text';
+export type VideoResolution = '360' | '480' | '720' | '1080';
+
+export interface YouTubeVideoInfo {
+  title: string;
+  author: string;
+  duration: string;
+  thumbnail: string;
+}
 
 export interface MediaDownloadResult {
   success: boolean;
@@ -33,6 +41,7 @@ export interface MediaDownloadResult {
   images?: string[];
   totalSlides?: number;
   selectedSlideIndices?: number[];
+  resolution?: VideoResolution;
   buffer?: Buffer;
   caption?: string;
   error?: string;
@@ -42,6 +51,7 @@ export interface MediaDownloadResult {
 export interface DownloadMediaOptions {
   isAudioOnly?: boolean;
   slideIndices?: number[];
+  resolution?: VideoResolution;
 }
 
 export interface ParsedMediaRequest {
@@ -49,6 +59,7 @@ export interface ParsedMediaRequest {
   slideIndices?: number[];
   isAllSlides?: boolean;
   rawSlideArg?: string;
+  resolution?: VideoResolution;
 }
 
 /**
@@ -67,13 +78,26 @@ export function parseSlideRequest(text: string): ParsedMediaRequest | null {
   if (!urlMatch) return null;
 
   const url = urlMatch[0];
-  const remaining = text
+  let remaining = text
     .replace(url, ' ')
     .replace(/^[!/.]\w+\s*/i, ' ')
     .trim();
 
+  // Extract resolution if explicitly specified (e.g. 1080, 720, 480, 360, 1080p, 720p, 480p, 360p, hd, fhd, sd)
+  let resolution: VideoResolution | undefined;
+  const resMatch = remaining.match(/\b(1080p?|720p?|480p?|360p?|fhd|hd|sd)\b/i);
+  if (resMatch) {
+    const rawRes = resMatch[1].toLowerCase();
+    if (rawRes === '1080' || rawRes === '1080p' || rawRes === 'fhd') resolution = '1080';
+    else if (rawRes === '720' || rawRes === '720p' || rawRes === 'hd') resolution = '720';
+    else if (rawRes === '480' || rawRes === '480p' || rawRes === 'sd') resolution = '480';
+    else if (rawRes === '360' || rawRes === '360p') resolution = '360';
+
+    remaining = remaining.replace(resMatch[0], ' ').trim();
+  }
+
   if (!remaining) {
-    return { url };
+    return { url, resolution };
   }
 
   // Matches slide/slides/halaman/hlm/foto/gambar followed by number(s)/range or 'all'/'semua'
@@ -81,12 +105,12 @@ export function parseSlideRequest(text: string): ParsedMediaRequest | null {
   const match = remaining.match(slideRegex);
 
   if (!match) {
-    return { url };
+    return { url, resolution };
   }
 
   const arg = match[1].toLowerCase();
   if (arg === 'all' || arg === 'semua') {
-    return { url, isAllSlides: true, rawSlideArg: arg };
+    return { url, isAllSlides: true, rawSlideArg: arg, resolution };
   }
 
   const indices = new Set<number>();
@@ -104,7 +128,8 @@ export function parseSlideRequest(text: string): ParsedMediaRequest | null {
       }
     } else {
       const num = parseInt(part.trim(), 10);
-      if (!isNaN(num) && num > 0) {
+      // Valid slide indices typically 1-50
+      if (!isNaN(num) && num > 0 && num <= 50) {
         indices.add(num);
       }
     }
@@ -115,11 +140,14 @@ export function parseSlideRequest(text: string): ParsedMediaRequest | null {
       url,
       slideIndices: Array.from(indices).sort((a, b) => a - b),
       rawSlideArg: arg,
+      resolution,
     };
   }
 
-  return { url };
+  return { url, resolution };
 }
+
+export const parseMediaRequest = parseSlideRequest;
 
 /**
  * Detect social media platform from URL
@@ -426,6 +454,76 @@ async function checkYtDlpAvailable(): Promise<boolean> {
 }
 
 /**
+ * Fast metadata fetcher for YouTube videos without downloading media
+ */
+export async function getYouTubeInfo(url: string): Promise<YouTubeVideoInfo | null> {
+  // Normalize YouTube shorts / mobile URLs if needed
+  let cleanUrl = url;
+  const shortMatch = url.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]+)/i);
+  if (shortMatch) {
+    cleanUrl = `https://www.youtube.com/watch?v=${shortMatch[1]}`;
+  }
+
+  const hasYtDlp = await checkYtDlpAvailable();
+  if (hasYtDlp) {
+    try {
+      const args = [
+        '--no-update',
+        '--no-playlist',
+        '--js-runtimes', 'node',
+        '--no-simulate',
+        '--skip-download',
+        '--print', 'METADATA:%(title)s|||%(uploader)s|||%(duration_string)s|||%(thumbnail)s',
+        cleanUrl,
+      ];
+
+      const { stdout } = await runYtDlp(args, 18000);
+      const metaMatch = stdout.match(/METADATA:(.*)/);
+      if (metaMatch) {
+        const parts = metaMatch[1].split('|||');
+        return {
+          title: (parts[0] && parts[0] !== 'NA' ? parts[0] : 'YouTube Video').trim(),
+          author: (parts[1] && parts[1] !== 'NA' ? parts[1] : 'YouTube Creator').trim(),
+          duration: (parts[2] && parts[2] !== 'NA' ? parts[2] : '').trim(),
+          thumbnail: (parts[3] && parts[3] !== 'NA' ? parts[3] : '').trim(),
+        };
+      }
+    } catch (err) {
+      console.warn('[YouTube Info] yt-dlp metadata error, falling back:', (err as Error).message);
+    }
+  }
+
+  // Fallback 1: ruhend-scraper.ytsearch
+  try {
+    const yts = await ruhend.ytsearch(cleanUrl);
+    const video = yts?.video?.[0];
+    if (video) {
+      return {
+        title: video.title || 'YouTube Video',
+        author: video.authorName || 'YouTube Creator',
+        duration: video.durationH || '',
+        thumbnail: video.thumbnail || '',
+      };
+    }
+  } catch {}
+
+  // Fallback 2: btch.youtube
+  try {
+    const res = await btch.youtube(cleanUrl);
+    if (res && (res.title || res.author)) {
+      return {
+        title: res.title || 'YouTube Video',
+        author: res.author || 'YouTube Creator',
+        duration: '',
+        thumbnail: res.thumbnail || '',
+      };
+    }
+  } catch {}
+
+  return null;
+}
+
+/**
  * Direct video downloader via yt-dlp for non-YouTube platforms (Facebook, Twitter/X, Instagram)
  */
 async function extractVideoViaYtDlp(
@@ -507,7 +605,8 @@ async function extractVideoViaYtDlp(
  */
 async function extractYouTubeViaYtDlp(
   url: string,
-  isAudioOnly: boolean = false
+  isAudioOnly: boolean = false,
+  resolution: VideoResolution = '720'
 ): Promise<MediaDownloadResult | null> {
   const hasYtDlp = await checkYtDlpAvailable();
   if (!hasYtDlp) return null;
@@ -534,15 +633,17 @@ async function extractYouTubeViaYtDlp(
         '-x',
         '--audio-format', 'mp3',
         '--audio-quality', '128K',
-        '--max-filesize', '35M',
+        '--max-filesize', '40M',
         '-o', outPath,
         url
       );
     } else {
+      const height = resolution === '1080' ? 1080 : resolution === '480' ? 480 : resolution === '360' ? 360 : 720;
       args.push(
-        '-f', 'bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/bv*[height<=720]+ba/b[height<=720]/best',
+        '-f',
+        `bv*[height<=${height}][ext=mp4]+ba[ext=m4a]/b[height<=${height}][ext=mp4]/bv*[height<=${height}]+ba/b[height<=${height}]/best`,
         '--merge-output-format', 'mp4',
-        '--max-filesize', '45M',
+        '--max-filesize', '95M',
         '-o', outPath,
         url
       );
@@ -578,7 +679,7 @@ async function extractYouTubeViaYtDlp(
         const durationText = duration ? `⏱️ *Durasi:* ${duration}\n` : '';
         const caption = isAudioOnly
           ? `🎵 *YouTube Audio MP3*\n📌 *Judul:* ${title.slice(0, 120)}\n👤 *Channel:* ${author}\n${durationText}💾 *Ukuran:* ${sizeMb} MB\n\n⚡ _Powered by Verand.Bot_`
-          : `🎬 *YouTube Video MP4*\n📌 *Judul:* ${title.slice(0, 120)}\n👤 *Channel:* ${author}\n${durationText}💾 *Ukuran:* ${sizeMb} MB\n\n⚡ _Powered by Verand.Bot_`;
+          : `🎬 *YouTube Video MP4 (${resolution}p)*\n📌 *Judul:* ${title.slice(0, 120)}\n👤 *Channel:* ${author}\n📐 *Resolusi:* ${resolution}p\n${durationText}💾 *Ukuran:* ${sizeMb} MB\n\n⚡ _Powered by Verand.Bot_`;
 
         return {
           success: true,
@@ -587,6 +688,7 @@ async function extractYouTubeViaYtDlp(
           title,
           author,
           thumbnail,
+          resolution,
           buffer: fileBuffer,
           caption,
         };
@@ -604,8 +706,8 @@ async function extractYouTubeViaYtDlp(
         author,
         thumbnail,
         error: isAudioOnly
-          ? '⚠️ Ukuran file audio melebihi batas WhatsApp (35 MB). Silakan pilih audio dengan durasi lebih pendek.'
-          : '⚠️ Ukuran video melebihi batas pengiriman WhatsApp (maks. 45 MB). Silakan unduh versi audio dengan perintah: *!ytmp3 <link>*',
+          ? '⚠️ Ukuran file audio melebihi batas WhatsApp (40 MB). Silakan pilih audio dengan durasi lebih pendek.'
+          : '⚠️ Ukuran video melebihi batas pengiriman WhatsApp (maks. 95 MB). Silakan unduh versi resolusi lebih rendah (contoh: .yt <link> 480) atau versi audio (.ytmp3 <link>).',
       };
     }
 
@@ -635,8 +737,8 @@ async function extractYouTubeViaYtDlp(
         platform: 'youtube',
         type: isAudioOnly ? 'audio' : 'video',
         error: isAudioOnly
-          ? '⚠️ Ukuran file audio melebihi batas WhatsApp (35 MB).'
-          : '⚠️ Ukuran video melebihi batas pengiriman WhatsApp (maks. 45 MB). Silakan unduh versi audio dengan perintah: *!ytmp3 <link>*',
+          ? '⚠️ Ukuran file audio melebihi batas WhatsApp (40 MB).'
+          : '⚠️ Ukuran video melebihi batas pengiriman WhatsApp (maks. 95 MB). Silakan unduh dengan resolusi lebih rendah (contoh: .yt <link> 480).',
       };
     }
 
@@ -656,7 +758,11 @@ async function extractYouTubeViaYtDlp(
 /**
  * YouTube media downloader (MP4 video or MP3 audio) with multi-tier engine
  */
-async function extractYouTube(url: string, isAudioOnly: boolean = false): Promise<MediaDownloadResult> {
+async function extractYouTube(
+  url: string,
+  isAudioOnly: boolean = false,
+  resolution: VideoResolution = '720'
+): Promise<MediaDownloadResult> {
   // Normalize YouTube shorts / mobile URLs if needed
   let cleanUrl = url;
   const shortMatch = url.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]+)/i);
@@ -666,7 +772,7 @@ async function extractYouTube(url: string, isAudioOnly: boolean = false): Promis
 
   // Provider 1: yt-dlp native (Best reliability, 100% direct MP4/MP3)
   try {
-    const ytDlpRes = await extractYouTubeViaYtDlp(cleanUrl, isAudioOnly);
+    const ytDlpRes = await extractYouTubeViaYtDlp(cleanUrl, isAudioOnly, resolution);
     if (ytDlpRes) {
       return ytDlpRes;
     }
@@ -1065,7 +1171,7 @@ export async function downloadMediaFromUrl(
       result = await extractTikTok(cleanUrl, options.isAudioOnly, options.slideIndices);
       break;
     case 'youtube':
-      result = await extractYouTube(cleanUrl, options.isAudioOnly);
+      result = await extractYouTube(cleanUrl, options.isAudioOnly, options.resolution);
       break;
     case 'facebook':
       result = await extractFacebook(cleanUrl);

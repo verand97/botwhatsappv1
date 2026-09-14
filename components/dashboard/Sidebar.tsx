@@ -15,7 +15,6 @@ import {
   Server,
   ExternalLink,
   ChevronRight,
-  Sparkles,
 } from 'lucide-react';
 
 export default function Sidebar() {
