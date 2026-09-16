@@ -19,9 +19,7 @@ import {
   Mountain,
   Sliders,
   Sparkles,
-  Info,
   MapPin,
-  Check,
 } from 'lucide-react';
 
 interface GempaData {
@@ -227,7 +225,6 @@ export default function BmkgDashboardPage() {
   // Debounce autocomplete pencarian desa dan kecamatan
   useEffect(() => {
     if (!cityInput || cityInput.trim().length < 2) {
-      setSuggestions([]);
       return;
     }
     const timer = setTimeout(async () => {
@@ -676,7 +673,11 @@ export default function BmkgDashboardPage() {
                   placeholder="Ketik nama desa, kelurahan, kecamatan (contoh: Desa Cikole, Lembang, Dieng, Pangalengan Bandung)..."
                   value={cityInput}
                   onChange={(e) => {
-                    setCityInput(e.target.value);
+                    const val = e.target.value;
+                    setCityInput(val);
+                    if (val.trim().length < 2) {
+                      setSuggestions([]);
+                    }
                     setShowSuggestions(true);
                   }}
                   onFocus={() => setShowSuggestions(true)}
@@ -685,7 +686,7 @@ export default function BmkgDashboardPage() {
                 />
 
                 {/* Autocomplete Suggestions Dropdown */}
-                {showSuggestions && (suggestions.length > 0 || isSearchingSuggestions) && (
+                {showSuggestions && cityInput.trim().length >= 2 && (suggestions.length > 0 || isSearchingSuggestions) && (
                   <div className="absolute top-full left-0 right-0 mt-2 bg-panel-850 border border-panel-700 rounded-xl shadow-2xl overflow-hidden z-40 max-h-72 overflow-y-auto divide-y divide-panel-750 backdrop-blur-md">
                     {isSearchingSuggestions && (
                       <div className="p-3 text-xs text-gray-400 flex items-center gap-2">
