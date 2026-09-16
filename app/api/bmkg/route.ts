@@ -6,6 +6,7 @@ import {
   getWeatherForecast,
   getMaritimeWarnings,
   getAirQuality,
+  searchIndonesianLocations,
   formatEarthquakeText,
   formatWeatherText,
 } from '@/lib/bot/bmkgService';
@@ -26,13 +27,20 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const type = searchParams.get('type') || 'summary';
   const q = searchParams.get('q') || '';
+  const elevationParam = searchParams.get('elevation');
+  const elevation = elevationParam ? Number(elevationParam) : undefined;
 
   try {
     switch (type) {
+      case 'search_locations': {
+        const results = await searchIndonesianLocations(q, 8);
+        return NextResponse.json({ success: true, data: results });
+      }
+
       case 'summary': {
         const [earthquakeResult, weatherResult, maritimeResult] = await Promise.allSettled([
           getLatestEarthquake(),
-          getWeatherForecast(q || 'Jakarta'),
+          getWeatherForecast(q || 'Jakarta', elevation),
           getMaritimeWarnings(),
         ]);
 
@@ -58,7 +66,7 @@ export async function GET(req: Request) {
 
       case 'weather': {
         const location = q || 'Jakarta';
-        const forecast = await getWeatherForecast(location);
+        const forecast = await getWeatherForecast(location, elevation);
         return NextResponse.json({ success: true, data: forecast });
       }
 
@@ -179,7 +187,8 @@ export async function POST(req: Request) {
 
     if (action === 'sendWeatherReport') {
       const location = city || 'Jakarta';
-      const forecast = await getWeatherForecast(location);
+      const customElev = body.elevation ? Number(body.elevation) : undefined;
+      const forecast = await getWeatherForecast(location, customElev);
       const text = formatWeatherText(forecast);
 
       const sock = botManager.getSocket();
@@ -190,7 +199,7 @@ export async function POST(req: Request) {
       await sock.sendMessage(cleanJid, { text });
       return NextResponse.json({
         success: true,
-        message: `Prakiraan cuaca ${forecast.locationName} berhasil dikirim ke ${cleanJid}!`,
+        message: `Prakiraan cuaca ${forecast.locationName} (${forecast.elevation || 0} mdpl) berhasil dikirim ke ${cleanJid}!`,
       });
     }
 

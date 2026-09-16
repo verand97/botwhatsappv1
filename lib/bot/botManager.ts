@@ -1727,7 +1727,7 @@ class BotManager {
             sender_masked: maskedSender,
             status: 'success',
             execution_time_ms: Date.now() - startTime,
-            detail: `Prakiraan cuaca ${forecast.locationName} (${forecast.current.condition}, ${forecast.current.tempC}°C) dikirim.`,
+            detail: `Prakiraan cuaca ${forecast.locationName} (${forecast.elevation || 0} mdpl, ${forecast.current.condition}, ${forecast.current.tempC}°C) dikirim.`,
           });
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : 'Gagal mencari ramalan cuaca daerah tersebut.';
@@ -1736,7 +1736,7 @@ class BotManager {
           } catch {}
           await this.sock.sendMessage(
             remoteJid,
-            { text: `⚠️ ${errMsg}\n\n_Contoh: \`${prefix}cuaca Bandung\` atau \`${prefix}cuaca Surabaya\`_` },
+            { text: `⚠️ ${errMsg}\n\n_Contoh pencarian desa & kecamatan berdasarkan ketinggian (MDPL):_\n• \`${prefix}cuaca Desa Cikole\`\n• \`${prefix}cuaca Lembang 1400mdpl\`\n• \`${prefix}cuaca Dieng\`\n• \`${prefix}cuaca Pangalengan, Bandung\`` },
             { quoted: msg }
           );
         }

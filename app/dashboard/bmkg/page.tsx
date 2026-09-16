@@ -16,6 +16,12 @@ import {
   Compass,
   ExternalLink,
   Layers,
+  Mountain,
+  Sliders,
+  Sparkles,
+  Info,
+  MapPin,
+  Check,
 } from 'lucide-react';
 
 interface GempaData {
@@ -47,10 +53,31 @@ interface WeatherSlot {
 
 interface WeatherData {
   locationName: string;
+  village?: string;
+  district?: string;
+  regency?: string;
   province?: string;
+  elevation?: number;
+  elevationCategory?: string;
+  tempSeaLevelDiff?: number;
+  seaLevelTempEstimate?: number;
+  isCustomElevation?: boolean;
   source: string;
   current: WeatherSlot;
   forecasts: WeatherSlot[];
+}
+
+interface LocationSuggestion {
+  name: string;
+  admin1?: string;
+  admin2?: string;
+  admin3?: string;
+  latitude: number;
+  longitude: number;
+  elevation: number;
+  elevationCategory: string;
+  country?: string;
+  type?: string;
 }
 
 interface MaritimeWarningRegion {
@@ -91,9 +118,14 @@ export default function BmkgDashboardPage() {
   const [maritimeList, setMaritimeList] = useState<MaritimeWarningRegion[]>([]);
   const [maritimeFilter, setMaritimeFilter] = useState('');
 
-  // Cuaca search state
+  // Cuaca search state & Desa/Kecamatan MDPL
   const [cityInput, setCityInput] = useState('Jakarta');
   const [searchingCity, setSearchingCity] = useState(false);
+  const [selectedElevation, setSelectedElevation] = useState<number | null>(null);
+  const [sliderElevation, setSliderElevation] = useState<number>(0);
+  const [suggestions, setSuggestions] = useState<LocationSuggestion[]>([]);
+  const [isSearchingSuggestions, setIsSearchingSuggestions] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   // Satelit subtab
   const [satelitType, setSatelitType] = useState<'awan' | 'hujan' | 'hotspot'>('awan');
@@ -192,18 +224,59 @@ export default function BmkgDashboardPage() {
     };
   }, []);
 
-  const handleSearchWeather = async (target?: string) => {
+  // Debounce autocomplete pencarian desa dan kecamatan
+  useEffect(() => {
+    if (!cityInput || cityInput.trim().length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setIsSearchingSuggestions(true);
+      try {
+        const res = await fetch('/api/bmkg?type=search_locations&q=' + encodeURIComponent(cityInput));
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setSuggestions(json.data);
+        }
+      } catch (err) {
+        console.error('Failed to search locations:', err);
+      } finally {
+        setIsSearchingSuggestions(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [cityInput]);
+
+  const handleSelectSuggestion = (item: LocationSuggestion) => {
+    const formatted = item.name + (item.admin2 ? `, ${item.admin2}` : item.admin1 ? `, ${item.admin1}` : '');
+    setCityInput(formatted);
+    setShowSuggestions(false);
+    setSelectedElevation(item.elevation);
+    setSliderElevation(item.elevation);
+    handleSearchWeather(item.name, item.elevation);
+  };
+
+  const handleSearchWeather = async (target?: string, customElev?: number) => {
     const query = target || cityInput;
     if (!query.trim()) return;
     setSearchingCity(true);
+    setShowSuggestions(false);
+    const elev = customElev !== undefined ? customElev : selectedElevation;
     try {
+      const elevParam = elev !== null && elev !== undefined ? `&elevation=${elev}` : '';
       const [wRes, aRes] = await Promise.all([
-        fetch('/api/bmkg?type=weather&q=' + encodeURIComponent(query)),
+        fetch('/api/bmkg?type=weather&q=' + encodeURIComponent(query) + elevParam),
         fetch('/api/bmkg?type=air&q=' + encodeURIComponent(query)),
       ]);
       const wJson = await wRes.json();
       const aJson = await aRes.json();
-      if (wJson.success && wJson.data) setWeatherData(wJson.data);
+      if (wJson.success && wJson.data) {
+        setWeatherData(wJson.data);
+        const actualElev = wJson.data.elevation || 0;
+        setSelectedElevation(actualElev);
+        setSliderElevation(actualElev);
+      }
       if (aJson.success && aJson.data) setAirData(aJson.data);
     } catch (err) {
       console.error('Search error:', err);
@@ -227,6 +300,7 @@ export default function BmkgDashboardPage() {
           action,
           targetJid: sendTargetJid,
           city: cityInput,
+          elevation: selectedElevation || weatherData?.elevation,
         }),
       });
       const data = await res.json();
@@ -582,192 +656,448 @@ export default function BmkgDashboardPage() {
       {/* TAB 2: CUACA & KUALITAS UDARA */}
       {activeTab === 'cuaca' && (
         <div className="space-y-6">
-          {/* City Search Bar & Quick Buttons */}
-          <div className="p-5 rounded-2xl bg-panel-900 border border-panel-750 space-y-4">
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          {/* City & Village Search Bar with Dropdown Suggestions */}
+          <div className="p-5 rounded-2xl bg-panel-900 border border-panel-750 space-y-4 relative">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-mono text-circuit-400 uppercase font-semibold">
+                <Mountain className="w-4 h-4" />
+                <span>Pencarian Desa, Kecamatan &amp; Elevasi Suhu (MDPL)</span>
+              </div>
+              <span className="text-[11px] text-gray-400 font-mono hidden sm:inline">
+                Hukum Braak: Suhu turun ~0.6°C / 100 mdpl
+              </span>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 relative">
               <div className="relative flex-1">
                 <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Ketik nama kota atau kabupaten (contoh: Bandung, Surabaya, Denpasar, Medan, Sukabumi)..."
+                  placeholder="Ketik nama desa, kelurahan, kecamatan (contoh: Desa Cikole, Lembang, Dieng, Pangalengan Bandung)..."
                   value={cityInput}
-                  onChange={(e) => setCityInput(e.target.value)}
+                  onChange={(e) => {
+                    setCityInput(e.target.value);
+                    setShowSuggestions(true);
+                  }}
+                  onFocus={() => setShowSuggestions(true)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSearchWeather()}
                   className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-panel-800 border border-panel-700 text-white placeholder-gray-500 text-xs sm:text-sm focus:outline-none focus:border-circuit-500"
                 />
+
+                {/* Autocomplete Suggestions Dropdown */}
+                {showSuggestions && (suggestions.length > 0 || isSearchingSuggestions) && (
+                  <div className="absolute top-full left-0 right-0 mt-2 bg-panel-850 border border-panel-700 rounded-xl shadow-2xl overflow-hidden z-40 max-h-72 overflow-y-auto divide-y divide-panel-750 backdrop-blur-md">
+                    {isSearchingSuggestions && (
+                      <div className="p-3 text-xs text-gray-400 flex items-center gap-2">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-circuit-400" />
+                        <span>Mencari desa dan data ketinggian MDPL...</span>
+                      </div>
+                    )}
+                    {suggestions.map((item, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handleSelectSuggestion(item)}
+                        className="w-full text-left p-3 hover:bg-panel-750 transition-colors flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <MapPin className="w-3.5 h-3.5 text-circuit-400 shrink-0" />
+                          <div className="truncate">
+                            <span className="font-semibold text-white">{item.name}</span>
+                            <span className="text-gray-400 text-[11px] ml-1.5">
+                              {item.admin2 ? `${item.admin2}, ` : ''}{item.admin1 || item.country}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold ${
+                            item.elevation >= 1500
+                              ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                              : item.elevation >= 700
+                              ? 'bg-circuit-500/20 text-circuit-300 border border-circuit-500/30'
+                              : item.elevation >= 400
+                              ? 'bg-live-500/20 text-live-300 border border-live-500/30'
+                              : 'bg-panel-700 text-gray-300'
+                          }`}>
+                            ⛰️ {item.elevation.toLocaleString('id-ID')} mdpl
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
+
               <button
                 onClick={() => handleSearchWeather()}
                 disabled={searchingCity}
-                className="px-5 py-2.5 rounded-xl bg-circuit-500 text-white text-xs sm:text-sm font-semibold hover:bg-circuit-600 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                className="px-5 py-2.5 rounded-xl bg-circuit-500 text-white text-xs sm:text-sm font-semibold hover:bg-circuit-600 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shrink-0 shadow-lg shadow-circuit-500/20"
               >
                 <Search className="w-4 h-4" />
                 <span>{searchingCity ? 'Mencari...' : 'Cek Cuaca'}</span>
               </button>
             </div>
 
-            {/* Quick Cities pills */}
-            <div className="flex items-center gap-1.5 flex-wrap text-xs text-gray-400">
-              <span className="font-mono text-[11px] text-gray-500 mr-1">Pintasan Kota:</span>
-              {['Jakarta', 'Bandung', 'Surabaya', 'Denpasar', 'Medan', 'Yogyakarta', 'Makassar', 'Balikpapan', 'Cianjur', 'Bogor'].map(
-                (city) => (
+            {/* Quick Chips of Famous High & Low Elevation Villages/Kecamatan */}
+            <div className="space-y-1.5 pt-1">
+              <div className="text-[11px] font-mono text-gray-400 flex items-center justify-between">
+                <span>Pilihan Desa &amp; Kecamatan Berdasarkan Ketinggian (MDPL):</span>
+                <span className="text-[10px] text-gray-500">Klik untuk langsung periksa suhu</span>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                {[
+                  { name: 'Dieng', reg: 'Wonosobo', mdpl: 2069, icon: '🏔️' },
+                  { name: 'Tosari', reg: 'Pasuruan (Bromo)', mdpl: 1707, icon: '🌲' },
+                  { name: 'Kintamani', reg: 'Bali', mdpl: 1486, icon: '🌋' },
+                  { name: 'Berastagi', reg: 'Karo', mdpl: 1402, icon: '☕' },
+                  { name: 'Pangalengan', reg: 'Bandung', mdpl: 1396, icon: '🍵' },
+                  { name: 'Lembang', reg: 'Bandung Barat', mdpl: 1252, icon: '🍓' },
+                  { name: 'Cisarua', reg: 'Bogor (Puncak)', mdpl: 1001, icon: '🌿' },
+                  { name: 'Batu', reg: 'Malang', mdpl: 980, icon: '🍎' },
+                  { name: 'Bandung', reg: 'Kota Bandung', mdpl: 708, icon: '🏙️' },
+                  { name: 'Jakarta', reg: 'Pusat (Pesisir)', mdpl: 8, icon: '🌊' },
+                ].map((item) => (
                   <button
-                    key={city}
+                    key={item.name}
                     onClick={() => {
-                      setCityInput(city);
-                      handleSearchWeather(city);
+                      setCityInput(`${item.name}, ${item.reg}`);
+                      setSelectedElevation(item.mdpl);
+                      setSliderElevation(item.mdpl);
+                      handleSearchWeather(item.name, item.mdpl);
                     }}
-                    className="px-2.5 py-1 rounded-lg bg-panel-800 border border-panel-700 text-gray-300 hover:text-white hover:border-circuit-500 text-[11px] font-medium transition-all"
+                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-all flex items-center gap-1.5 ${
+                      selectedElevation === item.mdpl
+                        ? 'bg-circuit-500/20 border-circuit-400 text-white font-bold'
+                        : 'bg-panel-800 border-panel-700 text-gray-300 hover:text-white hover:border-circuit-500'
+                    }`}
                   >
-                    {city}
+                    <span>{item.icon}</span>
+                    <span>{item.name}</span>
+                    <span className="font-mono text-[10px] text-circuit-400 font-semibold">
+                      {item.mdpl}m
+                    </span>
                   </button>
-                )
-              )}
+                ))}
+              </div>
             </div>
           </div>
 
           {/* Weather & Air Quality Display */}
           {weatherData && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Weather Main Card (2 Cols) */}
-              <div className="lg:col-span-2 p-6 rounded-2xl bg-panel-900 border border-panel-750 relative overflow-hidden space-y-5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-2 text-xs font-mono text-circuit-400">
-                      <span>Prakiraan Cuaca Resmi</span>
-                      <span>•</span>
-                      <span>{weatherData.source}</span>
-                    </div>
-                    <h2 className="text-2xl font-bold font-display text-white mt-1">
-                      {weatherData.locationName}
-                    </h2>
-                    <p className="text-xs text-gray-400">{weatherData.province}</p>
-                  </div>
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Weather Main Card (2 Cols) */}
+                <div className="lg:col-span-2 p-6 rounded-2xl bg-panel-900 border border-panel-750 relative overflow-hidden space-y-5 shadow-xl">
+                  {/* Background glow based on elevation */}
+                  <div className={`absolute top-0 right-0 w-80 h-80 pointer-events-none ${
+                    (weatherData.elevation || 0) >= 1500
+                      ? 'bg-linear-to-bl from-purple-500/10 via-transparent to-transparent'
+                      : (weatherData.elevation || 0) >= 700
+                      ? 'bg-linear-to-bl from-circuit-500/10 via-transparent to-transparent'
+                      : 'bg-linear-to-bl from-live-500/10 via-transparent to-transparent'
+                  }`} />
 
-                  <div className="text-right">
-                    <div className="text-4xl sm:text-5xl font-black font-display text-white">
-                      {weatherData.current.tempC}°C
-                    </div>
-                    <div className="text-xs font-medium text-circuit-300 mt-0.5">
-                      {weatherData.current.condition}
-                    </div>
-                  </div>
-                </div>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap text-xs font-mono">
+                        <span className="text-circuit-400 font-semibold">{weatherData.source}</span>
+                        <span className="text-gray-500">•</span>
+                        <span className={`px-2 py-0.5 rounded-md font-bold text-[11px] ${
+                          (weatherData.elevation || 0) >= 1500
+                            ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                            : (weatherData.elevation || 0) >= 700
+                            ? 'bg-circuit-500/20 text-circuit-300 border border-circuit-500/30'
+                            : (weatherData.elevation || 0) >= 400
+                            ? 'bg-live-500/20 text-live-300 border border-live-500/30'
+                            : 'bg-panel-800 text-gray-300 border border-panel-700'
+                        }`}>
+                          ⛰️ {(weatherData.elevation || 0).toLocaleString('id-ID')} MDPL
+                        </span>
+                        <span className="text-gray-400 text-[11px]">
+                          ({weatherData.elevationCategory || 'Dataran Rendah'})
+                        </span>
+                      </div>
 
-                {/* Weather Metrics */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-                  <div className="p-3 rounded-xl bg-panel-800 border border-panel-700 flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-circuit-500/10 text-circuit-400">
-                      <Droplets className="w-4 h-4" />
+                      <h2 className="text-2xl font-bold font-display text-white mt-1 flex items-center gap-2">
+                        <span>
+                          {weatherData.village ? `Desa/Kel. ${weatherData.village}` : weatherData.locationName}
+                        </span>
+                        {weatherData.district && (
+                          <span className="text-base font-normal text-gray-300">
+                            (Kec. {weatherData.district})
+                          </span>
+                        )}
+                      </h2>
+                      <p className="text-xs text-gray-400 font-mono">
+                        {weatherData.regency ? `${weatherData.regency}, ` : ''}{weatherData.province}
+                      </p>
                     </div>
-                    <div>
-                      <div className="text-[11px] text-gray-400">Kelembapan</div>
-                      <div className="text-sm font-bold text-white">{weatherData.current.humidity}%</div>
-                    </div>
-                  </div>
 
-                  <div className="p-3 rounded-xl bg-panel-800 border border-panel-700 flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-circuit-500/10 text-circuit-400">
-                      <Wind className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-gray-400">Kecepatan Angin</div>
-                      <div className="text-sm font-bold text-white">{weatherData.current.windSpeedKmh} km/h</div>
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-panel-800 border border-panel-700 flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-circuit-500/10 text-circuit-400">
-                      <Compass className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-gray-400">Arah Angin</div>
-                      <div className="text-sm font-bold text-white">{weatherData.current.windDir}</div>
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-panel-800 border border-panel-700 flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-circuit-500/10 text-circuit-400">
-                      <Eye className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-gray-400">Jarak Pandang</div>
-                      <div className="text-sm font-bold text-white">
-                        {weatherData.current.visibilityText || '> 10 km'}
+                    <div className="text-left sm:text-right shrink-0">
+                      <div className="text-4xl sm:text-5xl font-black font-display text-white tracking-tight">
+                        {weatherData.current.tempC}°C
+                      </div>
+                      <div className="text-xs font-semibold text-circuit-300 mt-0.5">
+                        {weatherData.current.condition}
+                      </div>
+                      <div className="text-[10px] text-gray-400 font-mono mt-0.5">
+                        Suhu riil sesuai elevasi {weatherData.elevation || 0} mdpl
                       </div>
                     </div>
                   </div>
+
+                  {/* Elevation & Lapse Rate Alert Banner */}
+                  {weatherData.tempSeaLevelDiff && Math.abs(weatherData.tempSeaLevelDiff) > 0.3 && (
+                    <div className="p-3 rounded-xl bg-panel-800/90 border border-circuit-500/30 flex items-start gap-2.5 text-xs text-gray-200">
+                      <Mountain className="w-4 h-4 text-circuit-400 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-semibold text-circuit-300">Pengaruh Ketinggian MDPL (Hukum Braak):</span>{' '}
+                        <span>
+                          Suhu udara di wilayah ini <strong className="text-white">~{Math.abs(weatherData.tempSeaLevelDiff).toFixed(1)}°C lebih dingin</strong> dibandingkan daerah pesisir pantai (0 mdpl) karena penurunan gradien suhu vertikal sebesar 0,6°C per 100 meter.
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Weather Metrics */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                    <div className="p-3 rounded-xl bg-panel-800 border border-panel-700 flex items-center gap-3">
+                      <div className="p-2 rounded-lg bg-circuit-500/10 text-circuit-400">
+                        <Droplets className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-gray-400">Kelembapan</div>
+                        <div className="text-sm font-bold text-white">{weatherData.current.humidity}%</div>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-panel-800 border border-panel-700 flex items-center gap-3">
+                      <div className="p-2 rounded-lg bg-circuit-500/10 text-circuit-400">
+                        <Wind className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-gray-400">Kecepatan Angin</div>
+                        <div className="text-sm font-bold text-white">{weatherData.current.windSpeedKmh} km/h</div>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-panel-800 border border-panel-700 flex items-center gap-3">
+                      <div className="p-2 rounded-lg bg-circuit-500/10 text-circuit-400">
+                        <Compass className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-gray-400">Arah Angin</div>
+                        <div className="text-sm font-bold text-white">{weatherData.current.windDir}</div>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-panel-800 border border-panel-700 flex items-center gap-3">
+                      <div className="p-2 rounded-lg bg-circuit-500/10 text-circuit-400">
+                        <Eye className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-gray-400">Jarak Pandang</div>
+                        <div className="text-sm font-bold text-white">
+                          {weatherData.current.visibilityText || '> 10 km'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Forecast Timeline */}
+                  <div className="space-y-2.5 pt-1">
+                    <div className="text-xs font-mono uppercase tracking-wider text-gray-400 flex items-center justify-between">
+                      <span>Prakiraan Waktu Berikutnya (Sesuai Suhu MDPL)</span>
+                      <span className="text-[10px] text-circuit-400 font-mono">Terkalibrasi Ketinggian</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      {weatherData.forecasts.slice(0, 4).map((f, idx) => {
+                        const timeStr = f.localDatetime?.split(' ')[1]?.slice(0, 5) || f.time?.slice(11, 16);
+                        return (
+                          <div
+                            key={idx}
+                            className="p-3 rounded-xl bg-panel-800 border border-panel-700 text-center space-y-1 hover:border-circuit-500/40 transition-colors"
+                          >
+                            <div className="text-[11px] font-mono text-gray-400">{timeStr} WIB</div>
+                            <div className="text-lg font-bold text-white">{f.tempC}°C</div>
+                            <div className="text-xs text-circuit-300 truncate">{f.condition}</div>
+                            <div className="text-[10px] text-gray-500">💧 {f.humidity}%</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
 
-                {/* Forecast Timeline */}
-                <div className="space-y-2.5 pt-2">
-                  <div className="text-xs font-mono uppercase tracking-wider text-gray-400">
-                    Prakiraan Beberapa Jam Ke Depan
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                    {weatherData.forecasts.slice(0, 4).map((f, idx) => {
-                      const timeStr = f.localDatetime?.split(' ')[1]?.slice(0, 5) || f.time?.slice(11, 16);
-                      return (
-                        <div
-                          key={idx}
-                          className="p-3 rounded-xl bg-panel-800 border border-panel-700 text-center space-y-1"
-                        >
-                          <div className="text-[11px] font-mono text-gray-400">{timeStr} WIB</div>
-                          <div className="text-lg font-bold text-white">{f.tempC}°C</div>
-                          <div className="text-xs text-circuit-300 truncate">{f.condition}</div>
-                          <div className="text-[10px] text-gray-500">💧 {f.humidity}%</div>
+                {/* Air Quality Card (1 Col) */}
+                <div className="p-6 rounded-2xl bg-panel-900 border border-panel-750 flex flex-col justify-between space-y-4">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-mono uppercase tracking-wider text-circuit-400">
+                        Kualitas Udara &amp; Polusi
+                      </span>
+                      <span className="text-xs font-mono text-gray-400">PM2.5 Sensor</span>
+                    </div>
+
+                    {airData ? (
+                      <div className="mt-4 space-y-4">
+                        <div className="text-center p-4 rounded-xl bg-panel-800 border border-panel-700">
+                          <div className="text-3xl font-black font-display text-white">{airData.aqi}</div>
+                          <div className="text-xs font-mono uppercase text-gray-400 mt-0.5">Air Quality Index (AQI)</div>
+                          <div className="mt-2 inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-panel-750 text-white">
+                            <span>{airData.statusColor}</span>
+                            <span>{airData.status}</span>
+                          </div>
                         </div>
-                      );
-                    })}
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="p-3 rounded-xl bg-panel-800 border border-panel-700 text-center">
+                            <div className="text-[11px] text-gray-400">PM2.5</div>
+                            <div className="text-base font-bold text-white mt-0.5">{airData.pm25} µg/m³</div>
+                          </div>
+                          <div className="p-3 rounded-xl bg-panel-800 border border-panel-700 text-center">
+                            <div className="text-[11px] text-gray-400">PM10</div>
+                            <div className="text-base font-bold text-white mt-0.5">{airData.pm10} µg/m³</div>
+                          </div>
+                        </div>
+
+                        <div className="p-3.5 rounded-xl bg-panel-800/80 border border-panel-700 text-xs text-gray-300 leading-relaxed">
+                          <span className="font-semibold text-white">Saran Kesehatan:</span> {airData.advisory}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="py-8 text-center text-xs text-gray-500">
+                        Memuat data kualitas udara...
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="text-[11px] text-gray-500 font-mono text-center">
+                    Gunakan perintah <code className="text-circuit-400">!cuaca {cityInput}</code> di WhatsApp untuk cek langsung.
                   </div>
                 </div>
               </div>
 
-              {/* Air Quality Card (1 Col) */}
-              <div className="p-6 rounded-2xl bg-panel-900 border border-panel-750 flex flex-col justify-between space-y-4">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-mono uppercase tracking-wider text-circuit-400">
-                      Kualitas Udara &amp; Polusi
-                    </span>
-                    <span className="text-xs font-mono text-gray-400">PM2.5 Sensor</span>
+              {/* Interactive Elevation & Hukum Braak Simulation Panel */}
+              <div className="p-6 rounded-2xl bg-panel-900 border border-panel-750 space-y-5">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-panel-750 pb-4">
+                  <div>
+                    <div className="flex items-center gap-2 text-xs font-mono text-circuit-400 uppercase font-semibold">
+                      <Sliders className="w-4 h-4" />
+                      <span>Simulasi Interaktif: Pengaruh Ketinggian Tempat (MDPL) Terhadap Suhu</span>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Geser slider untuk melihat bagaimana suhu udara di desa Anda berubah seiring bertambahnya ketinggian di atas permukaan laut.
+                    </p>
                   </div>
 
-                  {airData ? (
-                    <div className="mt-4 space-y-4">
-                      <div className="text-center p-4 rounded-xl bg-panel-800 border border-panel-700">
-                        <div className="text-3xl font-black font-display text-white">{airData.aqi}</div>
-                        <div className="text-xs font-mono uppercase text-gray-400 mt-0.5">Air Quality Index (AQI)</div>
-                        <div className="mt-2 inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-panel-750 text-white">
-                          <span>{airData.statusColor}</span>
-                          <span>{airData.status}</span>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="p-3 rounded-xl bg-panel-800 border border-panel-700 text-center">
-                          <div className="text-[11px] text-gray-400">PM2.5</div>
-                          <div className="text-base font-bold text-white mt-0.5">{airData.pm25} µg/m³</div>
-                        </div>
-                        <div className="p-3 rounded-xl bg-panel-800 border border-panel-700 text-center">
-                          <div className="text-[11px] text-gray-400">PM10</div>
-                          <div className="text-base font-bold text-white mt-0.5">{airData.pm10} µg/m³</div>
-                        </div>
-                      </div>
-
-                      <div className="p-3.5 rounded-xl bg-panel-800/80 border border-panel-700 text-xs text-gray-300 leading-relaxed">
-                        <span className="font-semibold text-white">Saran Kesehatan:</span> {airData.advisory}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="py-8 text-center text-xs text-gray-500">
-                      Memuat data kualitas udara...
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <span className="px-3 py-1 rounded-lg bg-panel-800 border border-panel-700 text-xs font-mono font-bold text-circuit-300">
+                      T = T₀ - 0.6 × (h / 100)
+                    </span>
+                  </div>
                 </div>
 
-                <div className="text-[11px] text-gray-500 font-mono text-center">
-                  Gunakan perintah <code className="text-circuit-400">!cuaca {cityInput}</code> di WhatsApp untuk cek langsung.
+                {/* Slider and Live Calculations */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-center">
+                  <div className="lg:col-span-2 space-y-4">
+                    <div className="flex items-center justify-between text-xs font-mono">
+                      <span className="text-gray-300">Atur Ketinggian Desa / Lereng:</span>
+                      <span className="text-base font-bold text-circuit-400">
+                        {sliderElevation.toLocaleString('id-ID')} MDPL
+                      </span>
+                    </div>
+
+                    <input
+                      type="range"
+                      min={0}
+                      max={3000}
+                      step={50}
+                      value={sliderElevation}
+                      onChange={(e) => setSliderElevation(Number(e.target.value))}
+                      className="w-full h-2 bg-panel-750 rounded-lg appearance-none cursor-pointer accent-circuit-400"
+                    />
+
+                    <div className="flex items-center justify-between text-[11px] font-mono text-gray-500">
+                      <span>0 mdpl (Pesisir Pantai)</span>
+                      <span>1.000 mdpl (Perbukitan)</span>
+                      <span>2.000 mdpl (Pegunungan)</span>
+                      <span>3.000 mdpl (Puncak Alpin)</span>
+                    </div>
+
+                    <div className="flex items-center gap-3 pt-2">
+                      <button
+                        onClick={() => handleSearchWeather(cityInput, sliderElevation)}
+                        disabled={searchingCity}
+                        className="px-4 py-2 rounded-xl bg-circuit-500 text-white text-xs font-semibold hover:bg-circuit-600 transition-all flex items-center gap-1.5 shadow-md shadow-circuit-500/20"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Terapkan Ketinggian {sliderElevation} mdpl</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const original = weatherData.elevation || 0;
+                          setSliderElevation(original);
+                          handleSearchWeather(cityInput, original);
+                        }}
+                        className="px-3 py-2 rounded-xl bg-panel-800 border border-panel-700 text-gray-300 text-xs font-medium hover:text-white hover:border-gray-500 transition-all"
+                      >
+                        Reset ke Elevasi Alami ({weatherData.elevation || 0} mdpl)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Calculated Simulation Summary Card */}
+                  {(() => {
+                    const baseSeaLevel =
+                      weatherData.seaLevelTempEstimate ||
+                      weatherData.current.tempC - (weatherData.tempSeaLevelDiff || 0);
+                    const diffAtSlider = -0.6 * (sliderElevation / 100);
+                    const tempAtSlider = Math.round((baseSeaLevel + diffAtSlider) * 10) / 10;
+
+                    return (
+                      <div className="p-4 rounded-xl bg-panel-800 border border-panel-700 space-y-3">
+                        <div className="text-xs font-mono uppercase text-gray-400">
+                          Hasil Estimasi Suhu Udara:
+                        </div>
+
+                        <div className="flex items-baseline justify-between">
+                          <span className="text-3xl font-black font-display text-white">
+                            {tempAtSlider}°C
+                          </span>
+                          <span className={`text-xs font-bold ${
+                            sliderElevation >= 1500
+                              ? 'text-purple-400'
+                              : sliderElevation >= 700
+                              ? 'text-circuit-400'
+                              : 'text-live-400'
+                          }`}>
+                            {sliderElevation >= 1500
+                              ? 'Sangat Dingin / Sejuk'
+                              : sliderElevation >= 700
+                              ? 'Sejuk & Segar'
+                              : 'Normal / Hangat'}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1.5 text-xs text-gray-300 pt-2 border-t border-panel-700">
+                          <div className="flex items-center justify-between">
+                            <span className="text-gray-400">Suhu Pesisir (0 mdpl):</span>
+                            <span className="font-mono text-white font-semibold">~{baseSeaLevel.toFixed(1)}°C</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-gray-400">Penurunan Suhu:</span>
+                            <span className="font-mono text-alert-400 font-semibold">{diffAtSlider.toFixed(1)}°C</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-gray-400">Ketinggian Tempat:</span>
+                            <span className="font-mono text-circuit-300 font-semibold">{sliderElevation} mdpl</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
