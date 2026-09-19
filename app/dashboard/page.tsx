@@ -5,22 +5,17 @@ import Link from 'next/link';
 import { useBot } from '@/lib/store/botStore';
 import ActivityLogRow from '@/components/dashboard/ActivityLogRow';
 import {
-  Cpu,
   Wifi,
-  Radio,
   Sliders,
   ScrollText,
   ShieldCheck,
   Zap,
   ArrowRight,
-  Sparkles,
-  ExternalLink,
   ChevronRight,
-  TrendingUp,
 } from 'lucide-react';
 
 export default function DashboardOverviewPage() {
-  const { botInstance, features, logs, rateLimit, stats } = useBot();
+  const { botInstance, features, logs, rateLimit } = useBot();
   const activeFeatures = features.filter((f) => f.is_enabled);
 
   return (

@@ -3,21 +3,13 @@ import Link from 'next/link';
 import {
   Cpu,
   Wifi,
-  Sparkles,
-  Sliders,
   ShieldCheck,
   ArrowRight,
-  Terminal,
-  Zap,
   Sticker,
   Download,
   Bot,
   MessageSquareReply,
   CheckCircle2,
-  Lock,
-  Server,
-  Layers,
-  Clock,
 } from 'lucide-react';
 
 export default function LandingPage() {

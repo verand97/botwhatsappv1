@@ -5,12 +5,10 @@ import { useBot } from '@/lib/store/botStore';
 import ActivityLogRow from '@/components/dashboard/ActivityLogRow';
 import {
   ScrollText,
-  Filter,
   Trash2,
   Download,
   Play,
   Pause,
-  Terminal,
   Search,
   CheckCircle2,
   Clock,

@@ -3,15 +3,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useBot } from '@/lib/store/botStore';
 import {
-  Terminal,
   Send,
   X,
   Bot,
-  User,
-  Sparkles,
-  AlertCircle,
-  HelpCircle,
-  Clock,
   CheckCheck,
 } from 'lucide-react';
 
@@ -36,7 +30,6 @@ export default function BotSimulatorDrawer({
     executeSimulatedCommand,
     botInstance,
     rateLimit,
-    features,
   } = useBot();
 
   const [inputMessage, setInputMessage] = useState('');

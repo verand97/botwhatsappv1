@@ -2,7 +2,7 @@
 
 import React from 'react';
 import QrConnectPanel from '@/components/dashboard/QrConnectPanel';
-import { QrCode, Shield, Server, HardDrive } from 'lucide-react';
+import { QrCode, Server } from 'lucide-react';
 
 export default function KoneksiPage() {
   return (

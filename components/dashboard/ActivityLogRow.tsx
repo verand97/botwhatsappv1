@@ -5,10 +5,8 @@ import { ActivityLog } from '@/lib/types';
 import {
   CheckCircle2,
   Clock,
-  ShieldAlert,
   XCircle,
   ChevronRight,
-  Info,
   Terminal,
 } from 'lucide-react';
 

@@ -4,11 +4,9 @@ import React, { useState } from 'react';
 import { useBot } from '@/lib/store/botStore';
 import {
   ShieldAlert,
-  Sliders,
   Hash,
   Clock,
   UserX,
-  Users,
   Check,
   AlertTriangle,
   Lock,
@@ -115,9 +113,18 @@ export default function PengaturanPage() {
                 Aktifkan pelindung anti-flood burst secara otomatis
               </label>
             </div>
-            <span className="text-gray-400 font-mono text-[11px]">
-              Maks: {maxPerMinute} cmd/menit
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-gray-400 font-mono text-[11px]">Maks:</span>
+              <input
+                type="number"
+                min="5"
+                max="60"
+                value={maxPerMinute}
+                onChange={(e) => setMaxPerMinute(Number(e.target.value))}
+                className="w-14 px-1.5 py-0.5 rounded bg-panel-800 border border-panel-700 text-white font-mono text-xs text-center focus:border-circuit-500 focus:outline-none"
+              />
+              <span className="text-gray-400 font-mono text-[11px]">cmd/menit</span>
+            </div>
           </div>
         </div>
 

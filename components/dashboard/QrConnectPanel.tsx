@@ -10,13 +10,12 @@ import {
   AlertTriangle,
   RotateCw,
   LogOut,
-  Sparkles,
   KeyRound,
   ShieldCheck,
 } from 'lucide-react';
 
 export default function QrConnectPanel() {
-  const { botInstance, connectBot, simulateConnect, disconnectBot, setConnecting, qrDataUrl } = useBot();
+  const { botInstance, connectBot, disconnectBot, qrDataUrl } = useBot();
   const [pairingMethod, setPairingMethod] = useState<'qr' | 'code'>('qr');
   const [phoneNumberInput, setPhoneNumberInput] = useState('6281234567890');
   const [pairingCodeGenerated, setPairingCodeGenerated] = useState<string | null>(null);
@@ -24,9 +23,14 @@ export default function QrConnectPanel() {
   const [pairingNotice, setPairingNotice] = useState<string | null>(null);
   const [countdown, setCountdown] = useState(45);
 
-  // Countdown timer for QR refresh
+  // Countdown timer for QR refresh & celebrate connection with confetti
   useEffect(() => {
-    if (botInstance.status === 'connected') return;
+    if (botInstance.status === 'connected') {
+      try {
+        confetti({ particleCount: 40, spread: 60, origin: { y: 0.6 } });
+      } catch {}
+      return;
+    }
     const interval = setInterval(() => {
       setCountdown((prev) => (prev <= 1 ? 45 : prev - 1));
     }, 1000);

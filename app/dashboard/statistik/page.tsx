@@ -2,7 +2,7 @@
 
 import React from 'react';
 import StatChart from '@/components/dashboard/StatChart';
-import { BarChart3, Activity, Cpu, Database } from 'lucide-react';
+import { BarChart3, Activity } from 'lucide-react';
 
 export default function StatistikPage() {
   return (

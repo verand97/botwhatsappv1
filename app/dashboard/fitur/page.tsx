@@ -4,15 +4,10 @@ import React, { useState } from 'react';
 import { useBot } from '@/lib/store/botStore';
 import ModuleCard from '@/components/dashboard/ModuleCard';
 import {
-  Sliders,
   Zap,
   Search,
-  Filter,
-  Sparkles,
-  Layers,
   Cpu,
 } from 'lucide-react';
-import { FeatureCategory } from '@/lib/types';
 
 export default function PapanModulPage() {
   const { features } = useBot();
