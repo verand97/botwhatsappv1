@@ -2,10 +2,10 @@
 
 import React from 'react';
 import { useBot } from '@/lib/store/botStore';
-import { BarChart3, TrendingUp, Zap, Sparkles, Clock, ShieldCheck } from 'lucide-react';
+import { BarChart3, TrendingUp, Zap, Sparkles, ShieldCheck } from 'lucide-react';
 
 export default function StatChart() {
-  const { stats, features, logs } = useBot();
+  const { stats } = useBot();
 
   const maxCount = Math.max(...stats.map((s) => s.commands_count), 500);
 
@@ -13,7 +13,6 @@ export default function StatChart() {
   const totalCommands = stats.reduce((acc, curr) => acc + curr.commands_count, 0);
   const totalStickers = stats.reduce((acc, curr) => acc + curr.stickers_created, 0);
   const totalDownloads = stats.reduce((acc, curr) => acc + curr.media_downloaded, 0);
-  const totalAi = stats.reduce((acc, curr) => acc + curr.ai_chats, 0);
 
   return (
     <div className="space-y-6">

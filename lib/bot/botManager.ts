@@ -227,9 +227,16 @@ class BotManager {
       this.loadState();
 
       // Otomatis aktifkan koneksi bot WhatsApp saat Next.js berjalan (npm run dev)
-      setTimeout(() => {
-        this.startBot().catch((e) => console.error('[BotManager] Auto-start error:', e));
-      }, 1000);
+      // Hanya auto-start jika bukan worker terpisah, bukan dalam fase build, dan bukan test
+      if (
+        process.env.IS_WORKER !== 'true' &&
+        process.env.NEXT_PHASE !== 'phase-production-build' &&
+        process.env.NODE_ENV !== 'test'
+      ) {
+        setTimeout(() => {
+          this.startBot().catch((e) => console.error('[BotManager] Auto-start error:', e));
+        }, 1000);
+      }
     } catch (err) {
       console.warn('[BotManager] Error initializing local sessions:', err);
       this.authDir = path.join(process.cwd(), 'sessions', 'baileys_auth');
