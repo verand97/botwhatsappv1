@@ -670,7 +670,7 @@ export default function BmkgDashboardPage() {
                 <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Ketik nama desa, kelurahan, kecamatan (contoh: Desa Cikole, Lembang, Dieng, Pangalengan Bandung)..."
+                  placeholder="Ketik nama desa & kecamatan, contoh: (Lembang, Cikole), Cikole Lembang, Dieng..."
                   value={cityInput}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -819,19 +819,28 @@ export default function BmkgDashboardPage() {
                         </span>
                       </div>
 
-                      <h2 className="text-2xl font-bold font-display text-white mt-1 flex items-center gap-2">
-                        <span>
-                          {weatherData.village ? `Desa/Kel. ${weatherData.village}` : weatherData.locationName}
-                        </span>
-                        {weatherData.district && (
-                          <span className="text-base font-normal text-gray-300">
-                            (Kec. {weatherData.district})
-                          </span>
-                        )}
-                      </h2>
-                      <p className="text-xs text-gray-400 font-mono">
-                        {weatherData.regency ? `${weatherData.regency}, ` : ''}{weatherData.province}
-                      </p>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {weatherData.village && (
+                            <span className="text-2xl font-bold font-display text-white">
+                              Desa {weatherData.village}
+                            </span>
+                          )}
+                          {weatherData.district && (
+                            <span className="px-2.5 py-0.5 rounded-lg bg-panel-800 border border-panel-700 text-sm font-semibold text-circuit-300">
+                              Kec. {weatherData.district}
+                            </span>
+                          )}
+                          {!weatherData.village && !weatherData.district && (
+                            <span className="text-2xl font-bold font-display text-white">
+                              {weatherData.locationName}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-400 font-mono">
+                          {weatherData.regency ? `${weatherData.regency}, ` : ''}{weatherData.province}
+                        </p>
+                      </div>
                     </div>
 
                     <div className="text-left sm:text-right shrink-0">

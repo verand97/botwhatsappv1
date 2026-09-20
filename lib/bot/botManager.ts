@@ -1743,7 +1743,7 @@ class BotManager {
           } catch {}
           await this.sock.sendMessage(
             remoteJid,
-            { text: `⚠️ ${errMsg}\n\n_Contoh pencarian desa & kecamatan berdasarkan ketinggian (MDPL):_\n• \`${prefix}cuaca Desa Cikole\`\n• \`${prefix}cuaca Lembang 1400mdpl\`\n• \`${prefix}cuaca Dieng\`\n• \`${prefix}cuaca Pangalengan, Bandung\`` },
+            { text: `⚠️ ${errMsg}\n\n_Contoh pencarian desa & kecamatan berdasarkan ketinggian (MDPL):_\n• \`${prefix}cuaca (Lembang, Cikole)\` ➔ _Desa Cikole di Kec. Lembang_\n• \`${prefix}cuaca Cikole, Lembang\`\n• \`${prefix}cuaca Dieng\`\n• \`${prefix}cuaca Lembang 1400mdpl\`` },
             { quoted: msg }
           );
         }

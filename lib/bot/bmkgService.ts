@@ -40,6 +40,8 @@ export interface WeatherSlot {
 
 export interface LocationSearchResult {
   name: string;
+  village?: string; // Nama Desa / Kelurahan
+  district?: string; // Kecamatan
   admin1?: string; // Provinsi
   admin2?: string; // Kabupaten / Kota
   admin3?: string; // Kecamatan (jika ada)
@@ -62,7 +64,7 @@ export interface WeatherForecast {
   tempSeaLevelDiff?: number; // Selisih suhu thd permukaan laut (0 mdpl)
   seaLevelTempEstimate?: number; // Estimasi suhu di 0 mdpl (°C)
   isCustomElevation?: boolean;
-  source: 'BMKG' | 'Open-Meteo (Global/Regional)' | 'BMKG (Elevasi MDPL Disesuaikan)';
+  source: 'BMKG' | 'Open-Meteo (Global/Regional)' | 'BMKG (Elevasi MDPL Disesuaikan)' | 'Open-Meteo High-Resolution (Terkalibrasi DEM)';
   current: WeatherSlot;
   forecasts: WeatherSlot[];
 }
@@ -226,9 +228,9 @@ export async function getFeltEarthquakes(): Promise<EarthquakeData[]> {
  * Kategori Dataran Berdasarkan Ketinggian (MDPL)
  */
 export function getElevationCategory(elevation: number): string {
-  if (elevation < 400) return 'Dataran Rendah (Pesisir & Dataran Rendah)';
-  if (elevation < 700) return 'Dataran Sedang (Perbukitan)';
-  if (elevation < 1500) return 'Dataran Tinggi (Pegunungan Sedang)';
+  if (elevation < 400) return 'Dataran Rendah (Pesisir & Lembah)';
+  if (elevation < 700) return 'Dataran Sedang (Perbukitan / Kaki Gunung)';
+  if (elevation < 1500) return 'Dataran Tinggi (Pegunungan / Perkebunan)';
   return 'Pegunungan Sangat Tinggi (Dataran Alpin)';
 }
 
@@ -246,26 +248,318 @@ export function calculateBraakTemperature(
   return Math.round((baseTemp - deltaT) * 10) / 10;
 }
 
+export interface ParsedLocationQuery {
+  raw: string;
+  village?: string;
+  district?: string;
+  explicitElevation?: number;
+  isPair: boolean;
+  cleanQuery: string;
+}
+
+/**
+ * Parser Cerdas Format Lokasi:
+ * Mendukung format:
+ * - /cuaca (kecamatan, desa)  => e.g. (Lembang, Cikole)
+ * - /cuaca (desa, kecamatan)  => e.g. (Cikole, Lembang)
+ * - /cuaca kecamatan, desa    => e.g. Lembang, Cikole
+ * - /cuaca desa, kecamatan    => e.g. Cikole, Lembang
+ * - /cuaca desa X kec Y
+ * - /cuaca kec Y desa X
+ * - /cuaca X 1400mdpl
+ */
+export function parseLocationQuery(input: string): ParsedLocationQuery {
+  let raw = (input || '').trim();
+
+  // 1. Ekstrak angka MDPL jika ada (contoh: "Lembang 1400mdpl" atau "(Lembang, Cikole) 1450 mdpl")
+  let explicitElevation: number | undefined;
+  const mdplMatch = raw.match(/(\d+)\s*(?:mdpl|m(?:eter)?\s*(?:dpl|darat)?)/i);
+  if (mdplMatch) {
+    explicitElevation = parseInt(mdplMatch[1], 10);
+    raw = raw.replace(/(\d+)\s*(?:mdpl|m(?:eter)?\s*(?:dpl|darat)?)/gi, '').trim();
+  }
+
+  // 2. Cek kurung siku / kurung biasa: misal "(Lembang, Cikole)" atau "[Lembang, Cikole]"
+  let insideParens = false;
+  const parenMatch = raw.match(/^\s*[\(\[]([^()\[\]]+)[\)\]]\s*$/);
+  if (parenMatch) {
+    raw = parenMatch[1].trim();
+    insideParens = true;
+  }
+
+  // 3. Cek kata kunci eksplisit: "desa <X> kec <Y>" atau "kec <Y> desa <X>"
+  const desaKecMatch = raw.match(
+    /(?:desa|kelurahan|kel\.?)\s+([^\s,]+(?: [^\s,]+)*?)\s+(?:kecamatan|kec\.?)\s+([^\s,]+(?: [^\s,]+)*)/i
+  );
+  if (desaKecMatch) {
+    const v = desaKecMatch[1].trim();
+    const d = desaKecMatch[2].trim();
+    return {
+      raw: input,
+      village: v,
+      district: d,
+      explicitElevation,
+      isPair: true,
+      cleanQuery: `${v}, ${d}`,
+    };
+  }
+
+  const kecDesaMatch = raw.match(
+    /(?:kecamatan|kec\.?)\s+([^\s,]+(?: [^\s,]+)*?)\s+(?:desa|kelurahan|kel\.?)\s+([^\s,]+(?: [^\s,]+)*)/i
+  );
+  if (kecDesaMatch) {
+    const d = kecDesaMatch[1].trim();
+    const v = kecDesaMatch[2].trim();
+    return {
+      raw: input,
+      district: d,
+      village: v,
+      explicitElevation,
+      isPair: true,
+      cleanQuery: `${v}, ${d}`,
+    };
+  }
+
+  // 4. Cek pemisah koma / garis miring: misal "Lembang, Cikole" atau "Cikole, Lembang"
+  const commaParts = raw.split(/[,/]+/).map((s) => s.trim()).filter(Boolean);
+  if (commaParts.length >= 2) {
+    const cleanP0 = commaParts[0]
+      .replace(/^(?:desa|kelurahan|kecamatan|kec\.?|kabupaten|kab\.?)\s+/i, '')
+      .trim();
+    const cleanP1 = commaParts[1]
+      .replace(/^(?:desa|kelurahan|kecamatan|kec\.?|kabupaten|kab\.?)\s+/i, '')
+      .trim();
+
+    const p0HasDesa = /^(?:desa|kelurahan)\b/i.test(commaParts[0]);
+    const p0HasKec = /^(?:kecamatan|kec\.?)\b/i.test(commaParts[0]);
+    const p1HasDesa = /^(?:desa|kelurahan)\b/i.test(commaParts[1]);
+    const p1HasKec = /^(?:kecamatan|kec\.?)\b/i.test(commaParts[1]);
+
+    let district: string | undefined;
+    let village: string | undefined;
+
+    if (p0HasDesa || p1HasKec) {
+      village = cleanP0;
+      district = cleanP1;
+    } else if (p0HasKec || p1HasDesa) {
+      district = cleanP0;
+      village = cleanP1;
+    } else if (insideParens) {
+      // Format resmi sesuai permintaan: /cuaca (kecamatan, desa)
+      district = cleanP0;
+      village = cleanP1;
+    } else {
+      // Format standar tanpa kurung: <desa>, <kecamatan/kota> (contoh: Cikole, Lembang)
+      village = cleanP0;
+      district = cleanP1;
+    }
+
+    return {
+      raw: input,
+      district,
+      village,
+      explicitElevation,
+      isPair: true,
+      cleanQuery: `${village || cleanP1}, ${district || cleanP0}`,
+    };
+  }
+
+  // 5. Query tunggal (misal "Dieng" atau "Lembang" atau "Desa Cikole")
+  const singleClean = raw.replace(/^(?:desa|kelurahan|kecamatan|kec\.?|kabupaten|kab\.?)\s+/i, '').trim();
+  const isDesaExplicit = /^(?:desa|kelurahan)\b/i.test(raw);
+  const isKecExplicit = /^(?:kecamatan|kec\.?)\b/i.test(raw);
+
+  return {
+    raw: input,
+    village: isDesaExplicit ? singleClean : undefined,
+    district: isKecExplicit ? singleClean : undefined,
+    explicitElevation,
+    isPair: false,
+    cleanQuery: singleClean,
+  };
+}
+
 /**
  * Pencarian Cerdas Lokasi Desa, Kelurahan, Kecamatan, dan Kota se-Indonesia
  * Menyediakan koordinat latitude, longitude, dan ketinggian (MDPL)
+ * Memisahkan Desa dan Kecamatan secara akurat
  */
 export async function searchIndonesianLocations(
   query: string,
-  limit: number = 6
+  limit: number = 6,
+  preParsed?: ParsedLocationQuery
 ): Promise<LocationSearchResult[]> {
   if (!query || !query.trim()) return [];
 
-  // Bersihkan kata depan administratif umum
-  let clean = query
-    .replace(/\b(desa|kelurahan|kecamatan|kec\.?|kabupaten|kab\.?|kota)\b/gi, '')
-    .trim();
-  if (!clean) clean = query.trim();
+  const parsed = preParsed || parseLocationQuery(query);
 
-  // Pisahkan nama utama dan filter wilayah (contoh: "Pangalengan, Bandung" atau "Cikole Lembang")
-  const parts = clean.split(/[,–-]+/).map((s) => s.trim()).filter(Boolean);
-  const primaryName = parts[0] || clean;
-  const secondaryFilter = parts.slice(1).join(' ').toLowerCase();
+  // Jika input berupa pasangan (Kecamatan + Desa atau Desa + Kecamatan)
+  if (parsed.isPair) {
+    const rawParts = parsed.cleanQuery.split(/[,/]+/).map((s) => s.trim());
+    const p0 = rawParts[0] || '';
+    const p1 = rawParts[1] || '';
+    const vCandidate = parsed.village || p1;
+    const dCandidate = parsed.district || p0;
+
+    // 1. Coba pencarian via Nominatim OpenStreetMap untuk pasangan desa & kecamatan
+    try {
+      const nominatimUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
+        `${vCandidate}, ${dCandidate}`
+      )}&format=json&addressdetails=1&countrycodes=id&limit=3`;
+      const nomRes = await fetchWithTimeout(nominatimUrl, 5000);
+      if (nomRes.ok) {
+        const nomData = await nomRes.json();
+        if (Array.isArray(nomData) && nomData.length > 0) {
+          const item = nomData[0];
+          const lat = parseFloat(item.lat);
+          const lon = parseFloat(item.lon);
+          const addr = item.address || {};
+          const county = addr.county || addr.city || addr.municipality;
+          const state = addr.state || 'Indonesia';
+
+          // Pertahankan nama desa dan kecamatan yang telah diparse dengan tepat
+          const finalVillage = parsed.village || vCandidate;
+          const finalDistrict = parsed.district || dCandidate;
+
+          // Ambil elevasi presisi tinggi DEM
+          let elev = 0;
+          try {
+            const eleRes = await fetchWithTimeout(
+              `https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lon}`,
+              4000
+            );
+            if (eleRes.ok) {
+              const eleData = await eleRes.json();
+              if (Array.isArray(eleData?.elevation) && eleData.elevation.length > 0) {
+                elev = Math.round(eleData.elevation[0]);
+              }
+            }
+          } catch {}
+
+          return [
+            {
+              name: `Desa ${finalVillage}`,
+              village: finalVillage,
+              district: finalDistrict,
+              admin1: state,
+              admin2: county ? String(county) : undefined,
+              admin3: finalDistrict,
+              latitude: lat,
+              longitude: lon,
+              elevation: elev,
+              elevationCategory: getElevationCategory(elev),
+              country: 'Indonesia',
+              type: 'desa',
+            },
+          ];
+        }
+      }
+    } catch {
+      // Nominatim fallback ke Open-Meteo cross-matching
+    }
+
+    // 2. Pencarian silang (cross-matching) via Open-Meteo Geocoding
+    try {
+      const [vRes, dRes] = await Promise.allSettled([
+        fetchWithTimeout(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
+            vCandidate
+          )}&count=10&language=id&countryCode=id`,
+          5000
+        ).then((r) => (r.ok ? r.json() : null)),
+        fetchWithTimeout(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
+            dCandidate
+          )}&count=10&language=id&countryCode=id`,
+          5000
+        ).then((r) => (r.ok ? r.json() : null)),
+      ]);
+
+      const vList: Record<string, unknown>[] =
+        vRes.status === 'fulfilled' && vRes.value?.results ? vRes.value.results : [];
+      const dList: Record<string, unknown>[] =
+        dRes.status === 'fulfilled' && dRes.value?.results ? dRes.value.results : [];
+
+      if (vList.length > 0 && dList.length > 0) {
+        let bestMatch: Record<string, unknown> | null = null;
+        let matchedDistrictInfo: Record<string, unknown> | null = null;
+        let minDistanceKm = 9999;
+
+        for (const vItem of vList) {
+          const vLat = Number(vItem.latitude) || 0;
+          const vLon = Number(vItem.longitude) || 0;
+          const vAdmin2 = String(vItem.admin2 || '').toLowerCase();
+
+          for (const dItem of dList) {
+            const dLat = Number(dItem.latitude) || 0;
+            const dLon = Number(dItem.longitude) || 0;
+            const dAdmin2 = String(dItem.admin2 || '').toLowerCase();
+
+            // Hitung jarak geografis perkiraan (km)
+            const distKm = Math.hypot(
+              (vLat - dLat) * 111,
+              (vLon - dLon) * 111 * Math.cos((dLat * Math.PI) / 180)
+            );
+
+            const isSameRegency = vAdmin2 && dAdmin2 && (vAdmin2.includes(dAdmin2) || dAdmin2.includes(vAdmin2));
+
+            if ((isSameRegency || distKm < 35) && distKm < minDistanceKm) {
+              minDistanceKm = distKm;
+              bestMatch = vItem;
+              matchedDistrictInfo = dItem;
+            }
+          }
+        }
+
+        if (bestMatch) {
+          const elev = Math.round(Number(bestMatch.elevation) || 0);
+          return [
+            {
+              name: `Desa ${bestMatch.name || vCandidate}`,
+              village: String(bestMatch.name || vCandidate),
+              district: String(matchedDistrictInfo?.name || dCandidate),
+              admin1: String(bestMatch.admin1 || matchedDistrictInfo?.admin1 || 'Indonesia'),
+              admin2: String(bestMatch.admin2 || matchedDistrictInfo?.admin2 || ''),
+              admin3: String(matchedDistrictInfo?.name || dCandidate),
+              latitude: Number(bestMatch.latitude) || 0,
+              longitude: Number(bestMatch.longitude) || 0,
+              elevation: elev,
+              elevationCategory: getElevationCategory(elev),
+              country: 'Indonesia',
+              type: 'desa',
+            },
+          ];
+        }
+      }
+
+      // Jika hanya daftar desa yang ditemukan
+      if (vList.length > 0) {
+        const first = vList[0];
+        const elev = Math.round(Number(first.elevation) || 0);
+        return [
+          {
+            name: `Desa ${first.name || vCandidate}`,
+            village: String(first.name || vCandidate),
+            district: dCandidate,
+            admin1: first.admin1 ? String(first.admin1) : undefined,
+            admin2: first.admin2 ? String(first.admin2) : undefined,
+            admin3: dCandidate,
+            latitude: Number(first.latitude) || 0,
+            longitude: Number(first.longitude) || 0,
+            elevation: elev,
+            elevationCategory: getElevationCategory(elev),
+            country: 'Indonesia',
+            type: 'desa',
+          },
+        ];
+      }
+    } catch (err) {
+      console.warn('[searchIndonesianLocations cross-match error]:', err);
+    }
+  }
+
+  // 3. Pencarian lokasi tunggal
+  const primaryName = parsed.cleanQuery || query.trim();
 
   try {
     const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
@@ -274,26 +568,38 @@ export async function searchIndonesianLocations(
     const res = await fetchWithTimeout(url, 6000);
     if (!res.ok) return [];
     const data = await res.json();
-    let list: Record<string, unknown>[] = data?.results || [];
-
-    if (secondaryFilter && list.length > 0) {
-      const filtered = list.filter((r) => {
-        const a1 = String(r.admin1 || '').toLowerCase();
-        const a2 = String(r.admin2 || '').toLowerCase();
-        const a3 = String(r.admin3 || '').toLowerCase();
-        return (
-          a1.includes(secondaryFilter) ||
-          a2.includes(secondaryFilter) ||
-          a3.includes(secondaryFilter)
-        );
-      });
-      if (filtered.length > 0) list = filtered;
-    }
+    const list: Record<string, unknown>[] = data?.results || [];
 
     return list.slice(0, limit).map((r) => {
       const elevation = Math.round(Number(r.elevation) || 0);
+      const rName = String(r.name || primaryName);
+
+      const isExplicitDesa = Boolean(parsed.village);
+      const isExplicitKec = Boolean(parsed.district);
+
+      let isDesa = false;
+      let isKec = false;
+
+      if (isExplicitDesa) {
+        isDesa = true;
+      } else if (isExplicitKec) {
+        isKec = true;
+      } else if (
+        r.feature_code === 'PPLA3' ||
+        String(r.admin3 || '').toLowerCase().includes(rName.toLowerCase())
+      ) {
+        isKec = true;
+      } else if (r.feature_code === 'PPLA2' || r.feature_code === 'PPLA') {
+        isDesa = false;
+        isKec = false;
+      } else {
+        isDesa = true;
+      }
+
       return {
-        name: String(r.name || primaryName),
+        name: rName,
+        village: isDesa ? rName : undefined,
+        district: isKec ? rName : undefined,
         admin1: r.admin1 ? String(r.admin1) : undefined,
         admin2: r.admin2 ? String(r.admin2) : undefined,
         admin3: r.admin3 ? String(r.admin3) : undefined,
@@ -302,7 +608,7 @@ export async function searchIndonesianLocations(
         elevation,
         elevationCategory: getElevationCategory(elevation),
         country: r.country ? String(r.country) : 'Indonesia',
-        type: elevation >= 700 ? 'desa' : 'kota',
+        type: isDesa ? 'desa' : isKec ? 'kecamatan' : 'kota',
       };
     });
   } catch (err) {
@@ -312,35 +618,20 @@ export async function searchIndonesianLocations(
 }
 
 /**
- * 4. Ambil Prakiraan Cuaca Berdasarkan Elevasi (MDPL) Desa/Kecamatan
- * Prioritas: BMKG adm4 / Open-Meteo High-Resolution DEM dengan kalibrasi Hukum Braak
+ * 4. Ambil Prakiraan Cuaca Berdasarkan Elevasi (MDPL) Desa & Kecamatan
+ * Memisahkan Desa dan Kecamatan secara akurat, mengambil cuaca riil non-dummy
  */
 export async function getWeatherForecast(
   query: string,
   customElevation?: number
 ): Promise<WeatherForecast> {
-  let explicitElevation = customElevation;
+  const parsed = parseLocationQuery(query);
+  const explicitElevation = customElevation !== undefined ? customElevation : parsed.explicitElevation;
 
-  // Ekstrak angka MDPL jika disertakan langsung dalam query pengguna (contoh: "Lembang 1400mdpl")
-  if (explicitElevation === undefined) {
-    const mdplMatch = query.match(/(\d+)\s*(?:mdpl|m(?:eter)?\s*(?:dpl|darat)?)/i);
-    if (mdplMatch) {
-      explicitElevation = parseInt(mdplMatch[1], 10);
-    }
-  }
+  const cleanSingle = parsed.cleanQuery.toLowerCase();
 
-  // Hapus token MDPL dari nama lokasi
-  let cleanQ = query.replace(/(\d+)\s*(?:mdpl|m(?:eter)?\s*(?:dpl|darat)?)/gi, '').trim();
-  const rawQ = cleanQ;
-
-  // Bersihkan prefiks administratif
-  cleanQ = cleanQ
-    .replace(/\b(desa|kelurahan|kecamatan|kec\.?|kabupaten|kab\.?|kota)\b/gi, '')
-    .trim()
-    .toLowerCase();
-
-  // 1. Cek apakah cocok dengan database adm4 BMKG kota/kabupaten
-  const matchedBmkg = BMKG_ADM4_MAP[cleanQ];
+  // 1. Cek apakah cocok dengan database adm4 BMKG kota/kabupaten besar (jika bukan pencarian spesifik desa/pasangan)
+  const matchedBmkg = !parsed.isPair ? BMKG_ADM4_MAP[cleanSingle] : undefined;
 
   if (matchedBmkg && explicitElevation === undefined) {
     try {
@@ -362,7 +653,6 @@ export async function getWeatherForecast(
           }
 
           if (flatSlots.length > 0) {
-            // Ambil elevasi dasar stasiun koordinat jika tersedia
             let stationElevation = 0;
             if (lokasi?.lat && lokasi?.lon) {
               try {
@@ -427,26 +717,30 @@ export async function getWeatherForecast(
     }
   }
 
-  // 2. Pencarian Desa / Kecamatan via Geocoding Indonesia
-  const searchResults = await searchIndonesianLocations(rawQ, 4);
+  // 2. Pencarian Desa & Kecamatan via Geocoding Indonesia
+  const searchResults = await searchIndonesianLocations(query, 4, parsed);
   const loc = searchResults[0];
 
   if (!loc) {
     throw new Error(
-      `Lokasi "${rawQ}" tidak ditemukan. Coba ketik nama desa atau kecamatan, misalnya "Desa Cikole", "Lembang", "Dieng", atau "Pangalengan Bandung".`
+      `Lokasi "${query}" tidak ditemukan.\n` +
+      `💡 Format yang didukung:\n` +
+      ` • /cuaca (kecamatan, desa) ➔ contoh: /cuaca (Lembang, Cikole)\n` +
+      ` • /cuaca <desa>, <kecamatan> ➔ contoh: /cuaca Cikole, Lembang\n` +
+      ` • /cuaca <desa> <angka>mdpl ➔ contoh: /cuaca Cikole 1400mdpl`
     );
   }
 
-  const { latitude, longitude, name, admin1, admin2, admin3, country } = loc;
+  const { latitude, longitude, name, admin1, admin2, country } = loc;
   const effectiveElevation =
     explicitElevation !== undefined ? explicitElevation : (loc.elevation || 0);
 
-  // Ambil cuaca presisi resolusi tinggi dengan menyertakan parameter &elevation=${effectiveElevation}
-  // Model prakiraan secara otomatis menyesuaikan temperatur dan tekanan adiabatik vertikal sesuai MDPL
+  // Ambil cuaca presisi resolusi tinggi secara live dengan &elevation=${effectiveElevation}
+  // Model prakiraan secara otomatis menyesuaikan temperatur dan tekanan adiabatik vertikal sesuai MDPL desa
   const wUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&elevation=${effectiveElevation}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m&hourly=temperature_2m,relative_humidity_2m,weather_code&timezone=auto`;
 
   const wRes = await fetchWithTimeout(wUrl, 7000);
-  if (!wRes.ok) throw new Error('Gagal mengambil data cuaca');
+  if (!wRes.ok) throw new Error('Gagal mengambil data cuaca riil dari server.');
   const wData = await wRes.json();
 
   const currentW = wData.current;
@@ -489,10 +783,24 @@ export async function getWeatherForecast(
   const tempSeaLevelDiff = Math.round(-0.6 * (effectiveElevation / 100) * 10) / 10;
   const seaLevelTempEstimate = Math.round((current.tempC - tempSeaLevelDiff) * 10) / 10;
 
+  const village = loc.village || (loc.type === 'desa' ? loc.name.replace(/^Desa\s+/i, '') : undefined);
+  const district = loc.district || (loc.type === 'kecamatan' ? loc.name.replace(/^Kec\.?\s+/i, '') : undefined);
+
+  let locationDisplayName = '';
+  if (village && district) {
+    locationDisplayName = `Desa ${village}, Kec. ${district}`;
+  } else if (village) {
+    locationDisplayName = `Desa ${village}`;
+  } else if (district) {
+    locationDisplayName = `Kec. ${district}`;
+  } else {
+    locationDisplayName = name;
+  }
+
   return {
-    locationName: `${name}${admin2 ? `, ${admin2}` : ''}`,
-    village: name,
-    district: admin3,
+    locationName: locationDisplayName,
+    village,
+    district,
     regency: admin2,
     province: admin1 || country || 'Indonesia',
     elevation: effectiveElevation,
@@ -500,7 +808,7 @@ export async function getWeatherForecast(
     tempSeaLevelDiff,
     seaLevelTempEstimate,
     isCustomElevation: explicitElevation !== undefined && explicitElevation !== loc.elevation,
-    source: 'Open-Meteo (Global/Regional)',
+    source: 'Open-Meteo High-Resolution (Terkalibrasi DEM)',
     current,
     forecasts,
   };
@@ -743,23 +1051,56 @@ export function formatWeatherText(w: WeatherForecast): string {
 
   const diffText =
     w.tempSeaLevelDiff && Math.abs(w.tempSeaLevelDiff) > 0.3
-      ? `📉 *Efek Suhu MDPL:* Lebih sejuk ~${Math.abs(w.tempSeaLevelDiff).toFixed(1)}°C dibanding pesisir (0 mdpl)\n`
+      ? `📉 *Efek Suhu MDPL:* Lebih sejuk ~${Math.abs(w.tempSeaLevelDiff).toFixed(1)}°C dibanding pesisir pantai (0 mdpl)\n`
       : '';
 
-  const locationDisplay = w.village
-    ? `Desa/Kel. ${w.village}${w.district ? ', Kec. ' + w.district : ''}`
-    : w.locationName;
+  // Pemisahan tegas antara Desa dan Kecamatan
+  let wilayahSection = '';
+  if (w.village && w.district) {
+    wilayahSection =
+      `🏡 *Desa/Kelurahan:* *${w.village}*\n` +
+      `🏢 *Kecamatan:* *Kec. ${w.district}*\n` +
+      (w.regency ? `🏛️ *Kabupaten/Kota:* ${w.regency}\n` : '') +
+      `🗺️ *Provinsi:* ${w.province || 'Indonesia'}\n`;
+  } else if (w.village) {
+    wilayahSection =
+      `🏡 *Desa/Kelurahan:* *${w.village}*\n` +
+      (w.district ? `🏢 *Kecamatan:* Kec. ${w.district}\n` : '') +
+      (w.regency ? `🏛️ *Kabupaten/Kota:* ${w.regency}\n` : '') +
+      `🗺️ *Provinsi:* ${w.province || 'Indonesia'}\n`;
+  } else if (w.district) {
+    wilayahSection =
+      `🏢 *Kecamatan:* *Kec. ${w.district}* (Pusat Kecamatan)\n` +
+      (w.regency ? `🏛️ *Kabupaten/Kota:* ${w.regency}\n` : '') +
+      `🗺️ *Provinsi:* ${w.province || 'Indonesia'}\n`;
+  } else {
+    wilayahSection =
+      `📍 *Lokasi:* *${w.locationName}*\n` +
+      (w.regency ? `🏛️ *Kabupaten/Kota:* ${w.regency}\n` : '') +
+      `🗺️ *Provinsi:* ${w.province || 'Indonesia'}\n`;
+  }
+
+  // Tips informatif jika hanya mencari nama kecamatan saja
+  const districtOnlyTip =
+    !w.village && w.district
+      ? `\n💡 _Catatan: Setiap desa di Kec. ${w.district} memiliki ketinggian (MDPL) dan suhu yang berbeda (ada dataran rendah / sedang / tinggi)._\n` +
+        `💡 _Untuk cek cuaca desa spesifik di kecamatan ini, ketik:_ \`/cuaca (${w.district}, <nama desa>)\`\n`
+      : '';
+
+  const customElevationNotice = w.isCustomElevation
+    ? ` ⚠️ _(MDPL manual)_\n`
+    : '\n';
 
   return (
     `⛅ *PRAKIRAAN CUACA RESMI BERDASARKAN ELEVASI (MDPL)*\n` +
-    `📍 *Lokasi:* ${locationDisplay}\n` +
-    (w.regency ? `🏙️ *Wilayah:* ${w.regency}, ${w.province || 'Indonesia'}\n` : `🏙️ *Wilayah:* ${w.province || 'Indonesia'}\n`) +
-    `⛰️ *Ketinggian:* *${elevFormatted} mdpl* (${cat})\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    wilayahSection +
+    `⛰️ *Ketinggian:* *${elevFormatted} mdpl* (${cat})${customElevationNotice}` +
     diffText +
     `📡 *Sumber Data:* ${w.source}\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
     `${icon} *Kondisi Saat Ini:* *${w.current.condition}*\n` +
-    `🌡️ *Suhu Udara:* *${w.current.tempC}°C* (Disesuaikan elevasi ${elevFormatted} mdpl)\n` +
+    `🌡️ *Suhu Udara:* *${w.current.tempC}°C* (Disesuaikan elevasi riil ${elevFormatted} mdpl)\n` +
     `💧 *Kelembapan:* ${w.current.humidity}%\n` +
     `💨 *Angin:* ${w.current.windSpeedKmh} km/jam (${w.current.windDir})\n` +
     (w.current.visibilityText ? `👁️ *Jarak Pandang:* ${w.current.visibilityText}\n` : '') +
@@ -767,8 +1108,12 @@ export function formatWeatherText(w: WeatherForecast): string {
     `🕒 *Prakiraan Tiap Waktu (Sesuai Suhu MDPL):*\n` +
     forecastRows.join('\n') +
     `\n━━━━━━━━━━━━━━━━━━━━━\n` +
+    districtOnlyTip +
     `💡 _Hukum Braak: Suhu udara rata-rata turun ±0.6°C setiap naik 100 meter (MDPL)._\n` +
-    `💡 _Ketik \`!cuaca <desa/kecamatan>\` atau \`!cuaca <desa> <angka>mdpl\`_`
+    `💡 _Format Pencarian Desa Presisi:_\n` +
+    ` • \`/cuaca (Kecamatan, Desa)\` ➔ contoh: \`/cuaca (Lembang, Cikole)\`\n` +
+    ` • \`/cuaca <Desa>, <Kecamatan>\` ➔ contoh: \`/cuaca Cikole, Lembang\`\n` +
+    ` • \`/cuaca <Desa> <angka>mdpl\` ➔ contoh: \`/cuaca Cikole 1400mdpl\``
   );
 }
 
@@ -857,7 +1202,8 @@ export function formatBmkgMenuText(prefix: string): string {
     `• \`${prefix}gempa5m\` : Daftar 10 gempa bumi M 5.0+ terbaru\n` +
     `• \`${prefix}dirasakan\` : Daftar 10 gempa yang dirasakan masyarakat\n\n` +
     `⛅ *2. CUACA & KUALITAS UDARA*\n` +
-    `• \`${prefix}cuaca <kota>\` : Cek ramalan cuaca (contoh: \`${prefix}cuaca jakarta\`, \`${prefix}cuaca bandung\`)\n` +
+    `• \`${prefix}cuaca (kecamatan, desa)\` : Cek ramalan cuaca presisi desa (contoh: \`${prefix}cuaca (Lembang, Cikole)\`)\n` +
+    `• \`${prefix}cuaca <desa/kecamatan>\` : Cek cuaca desa/kecamatan (contoh: \`${prefix}cuaca Cikole, Lembang\`, \`${prefix}cuaca Dieng\`)\n` +
     `• \`${prefix}udara <kota>\` : Cek indeks polusi & partikulat PM2.5/AQI\n\n` +
     `🛰️ *3. CITRA SATELIT & DETEKSI BENCANA*\n` +
     `• \`${prefix}satelit\` : Citra Satelit Himawari-9 Awan & Badai\n` +
@@ -867,7 +1213,7 @@ export function formatBmkgMenuText(prefix: string): string {
     `• \`${prefix}gelombang\` : Peringatan dini gelombang tinggi perairan Indonesia\n` +
     `• \`${prefix}maritim\` : Info cuaca maritim & keselamatan berlayar\n\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
-    `⚡ _Data resmi langsung dari server BMKG (Badan Meteorologi, Klimatologi, dan Geofisika Indonesia)_`
+    `⚡ _Data resmi langsung dari server BMKG & sensor presisi elevasi DEM._`
   );
 }
 
